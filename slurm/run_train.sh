@@ -39,8 +39,7 @@ BASE_MODEL=${7:-meta-llama/Llama-3.1-8B}
 # or:
 #   source /path/to/venv/bin/activate
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "${SCRIPT_DIR}/.."
+cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
 echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"

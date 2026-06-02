@@ -41,8 +41,7 @@ fi
 # or:
 #   source /path/to/venv/bin/activate
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "${SCRIPT_DIR}/.."
+cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs results
 
 echo "[START] Analysis: ${ANALYSIS_TYPE} | Job ID: ${SLURM_JOB_ID:-local} | $(date)"
