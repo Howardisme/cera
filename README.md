@@ -15,7 +15,7 @@ space rather than only a low-dimensional subspace.
 ## Installation
 
 ```bash
-git clone https://github.com/<your-repo>/cera.git
+git clone git@github.com:hhchen1105/cera-refactored.git
 cd cera
 pip install -r requirements.txt
 ```
