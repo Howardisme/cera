@@ -1,0 +1,9 @@
+results/
+slurm_logs/
+*.pyc
+__pycache__/
+.env
+*.pt
+*.jsonl
+*.egg-info/
+.DS_Store
