@@ -182,10 +182,10 @@ sbatch slurm/run_eval.sh  my_cell CeRA 128 5e-4 0.1
 ## Citation
 
 ```bibtex
-@inproceedings{cera2025,
-  title   = {CeRA: Capacity-enhanced Rank Adaptation},
-  author  = {},
-  year    = {2025},
-  note    = {Paper under review}
+@inproceedings{chen26cera,
+  title   = {CeRA: Overcoming the Linear Ceiling of Low-Rank Adaptation via Capacity Expansion},
+  author  = {Hung-Hsuan Chen},
+  year    = {2026},
+  journal={arXiv preprint arXiv:2602.22911}
 }
 ```
