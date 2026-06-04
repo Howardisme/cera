@@ -65,12 +65,22 @@ case "$LR" in
   *)      LR_DECIMAL="$LR"    ;;
 esac
 
-# Find the most recent matching results/ directory
+# Find the most recent matching results/ directory.
+# train.py appends _{MODEL_TAG} only for non-default models, so we must
+# filter by model size to avoid picking up a checkpoint from a different model.
 MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
-RESULTS_DIR=$(ls -dt results/Exp_${METHOD}_math_R${RANK}_lr${LR_DECIMAL}_* 2>/dev/null \
-    | grep "_D${DROPOUT}" | head -1)
+DEFAULT_MODEL_TAG="Llama-3.1-8B"
+if [ "$MODEL_TAG" = "$DEFAULT_MODEL_TAG" ]; then
+    # Default model dirs have no model-size suffix → exclude any non-default model dir
+    RESULTS_DIR=$(ls -dt results/Exp_${METHOD}_math_R${RANK}_lr${LR_DECIMAL}_* 2>/dev/null \
+        | grep "_D${DROPOUT}" | grep -v "_Llama-3\." | head -1)
+else
+    # Non-default model dirs contain _<MODEL_TAG> → require it
+    RESULTS_DIR=$(ls -dt results/Exp_${METHOD}_math_R${RANK}_lr${LR_DECIMAL}_* 2>/dev/null \
+        | grep "_D${DROPOUT}" | grep "_${MODEL_TAG}" | head -1)
+fi
 if [ -z "$RESULTS_DIR" ]; then
-    echo "[ERROR] No results/ directory found for METHOD=${METHOD} RANK=${RANK} LR=${LR_DECIMAL} D=${DROPOUT}"
+    echo "[ERROR] No results/ directory found for METHOD=${METHOD} RANK=${RANK} LR=${LR_DECIMAL} D=${DROPOUT} MODEL=${MODEL_TAG}"
     exit 1
 fi
 
