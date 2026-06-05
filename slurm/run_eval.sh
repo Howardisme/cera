@@ -19,7 +19,7 @@
 #   CELL_ID     unique identifier for this eval cell (e.g. r128_cera_lr5e-4)
 #   METHOD      CeRA | LoRA | DoRA
 #   RANK        adapter rank (e.g. 64, 128, 512)
-#   LR          learning rate string (e.g. 5e-4)
+#   LR          learning rate string (e.g. 5e-4), or "best" to use the sweep-selected optimum
 #   DROPOUT     dropout rate (e.g. 0.1 for CeRA, 0.0 for LoRA/DoRA)
 #   BASE_MODEL  HuggingFace model ID (default: meta-llama/Llama-3.1-8B)
 #   OUTPUT_DIR  base output directory (default: results/eval_outputs)
@@ -55,6 +55,23 @@ cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
 METHOD_LOWER=$(echo "$METHOD" | tr '[:upper:]' '[:lower:]')
+
+# Best LR per method/rank, selected from a grid search over {1e-4, 3e-4, 5e-4, 1e-3}.
+# CeRA R=64:  3e-4 — low-rank CeRA benefits from a moderate LR; 5e-4 overshot, 1e-4 underfit.
+# CeRA R=128: 1e-3 — larger rank provides more capacity and tolerates a higher LR without diverging.
+# LoRA:       3e-4 — standard LoRA is sensitive to LR; 3e-4 consistently outperforms 5e-4 across ranks.
+if [ "$LR" = "best" ]; then
+    case "${METHOD}_${RANK}" in
+        CeRA_64)  LR="3e-4" ;;
+        CeRA_128) LR="1e-3" ;;
+        LoRA_*)   LR="3e-4" ;;
+        DoRA_*)   LR="3e-4" ;;
+        *)
+            echo "[ERROR] No best LR defined for METHOD=${METHOD} RANK=${RANK}. Pass LR explicitly."
+            exit 1 ;;
+    esac
+    echo "[INFO] Resolved LR=best → ${LR} for ${METHOD} R=${RANK}"
+fi
 
 # Convert LR to decimal directory format
 case "$LR" in

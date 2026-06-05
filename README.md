@@ -179,6 +179,21 @@ sbatch slurm/run_train.sh CeRA 128 5e-4 0.1 math 3
 sbatch slurm/run_eval.sh  my_cell CeRA 128 5e-4 0.1
 ```
 
+Pass `best` as the LR argument to automatically use the sweep-selected optimum
+for each method/rank combination:
+
+| Method | Rank | Best LR |
+|--------|------|---------|
+| CeRA   | 64   | 3e-4    |
+| CeRA   | 128  | 1e-3    |
+| LoRA   | any  | 3e-4    |
+| DoRA   | any  | 3e-4    |
+
+```bash
+sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
+sbatch slurm/run_eval.sh  my_cell CeRA 128 best 0.1
+```
+
 ## Citation
 
 ```bibtex

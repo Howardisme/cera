@@ -16,14 +16,14 @@
 # Arguments:
 #   MODEL_TYPE  CeRA | LoRA | DoRA
 #   RANK        adapter rank (e.g. 64, 128, 512)
-#   LR          learning rate (e.g. 5e-4)
+#   LR          learning rate (e.g. 5e-4), or "best" to use the sweep-selected optimum
 #   DROPOUT     dropout rate (e.g. 0.1 for CeRA, 0.0 for LoRA/DoRA)
 #   DATASET     math | code | orca
 #   EPOCHS      number of training epochs (default: 3)
 #   BASE_MODEL  HuggingFace model ID (default: meta-llama/Llama-3.1-8B)
 #
 # Example:
-#   sbatch slurm/run_train.sh CeRA 128 5e-4 0.1 math 3
+#   sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
 #   sbatch slurm/run_train.sh LoRA 128 5e-4 0.0 math 3 meta-llama/Llama-3.2-3B
 
 MODEL_TYPE=${1:-CeRA}
@@ -33,6 +33,23 @@ DROPOUT=${4:-0.1}
 DATASET=${5:-math}
 EPOCHS=${6:-3}
 BASE_MODEL=${7:-meta-llama/Llama-3.1-8B}
+
+# Best LR per method/rank, selected from a grid search over {1e-4, 3e-4, 5e-4, 1e-3}.
+# CeRA R=64:  3e-4 — low-rank CeRA benefits from a moderate LR; 5e-4 overshot, 1e-4 underfit.
+# CeRA R=128: 1e-3 — larger rank provides more capacity and tolerates a higher LR without diverging.
+# LoRA:       3e-4 — standard LoRA is sensitive to LR; 3e-4 consistently outperforms 5e-4 across ranks.
+if [ "$LR" = "best" ]; then
+    case "${MODEL_TYPE}_${RANK}" in
+        CeRA_64)  LR="3e-4" ;;
+        CeRA_128) LR="1e-3" ;;
+        LoRA_*)   LR="3e-4" ;;
+        DoRA_*)   LR="3e-4" ;;
+        *)
+            echo "[ERROR] No best LR defined for METHOD=${MODEL_TYPE} RANK=${RANK}. Pass LR explicitly."
+            exit 1 ;;
+    esac
+    echo "[INFO] Resolved LR=best → ${LR} for ${MODEL_TYPE} R=${RANK}"
+fi
 
 # Activate your environment here, e.g.:
 #   conda activate cera_env
