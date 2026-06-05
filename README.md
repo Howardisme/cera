@@ -186,8 +186,8 @@ for each method/rank combination:
 |--------|------|---------|
 | CeRA   | 64   | 3e-4    |
 | CeRA   | 128  | 1e-3    |
-| LoRA   | any  | 3e-4    |
-| DoRA   | any  | 3e-4    |
+| LoRA   | 64 / 128 / 512 | 3e-4    |
+| DoRA   | 64 / 128 / 512 | 3e-4    |
 
 ```bash
 sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
