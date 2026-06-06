@@ -1,0 +1,34 @@
+# LR sweep for Llama-3.2-1B and Llama-3.2-3B
+# Format: CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL
+cera_r64_lr1e-4_1b   CeRA  64   1e-4  0.1  meta-llama/Llama-3.2-1B
+cera_r64_lr3e-4_1b   CeRA  64   3e-4  0.1  meta-llama/Llama-3.2-1B
+cera_r64_lr5e-4_1b   CeRA  64   5e-4  0.1  meta-llama/Llama-3.2-1B
+cera_r64_lr1e-3_1b   CeRA  64   1e-3  0.1  meta-llama/Llama-3.2-1B
+cera_r128_lr1e-4_1b  CeRA  128  1e-4  0.1  meta-llama/Llama-3.2-1B
+cera_r128_lr3e-4_1b  CeRA  128  3e-4  0.1  meta-llama/Llama-3.2-1B
+cera_r128_lr5e-4_1b  CeRA  128  5e-4  0.1  meta-llama/Llama-3.2-1B
+cera_r128_lr1e-3_1b  CeRA  128  1e-3  0.1  meta-llama/Llama-3.2-1B
+lora_r64_lr1e-4_1b   LoRA  64   1e-4  0.0  meta-llama/Llama-3.2-1B
+lora_r64_lr3e-4_1b   LoRA  64   3e-4  0.0  meta-llama/Llama-3.2-1B
+lora_r64_lr5e-4_1b   LoRA  64   5e-4  0.0  meta-llama/Llama-3.2-1B
+lora_r64_lr1e-3_1b   LoRA  64   1e-3  0.0  meta-llama/Llama-3.2-1B
+lora_r128_lr1e-4_1b  LoRA  128  1e-4  0.0  meta-llama/Llama-3.2-1B
+lora_r128_lr3e-4_1b  LoRA  128  3e-4  0.0  meta-llama/Llama-3.2-1B
+lora_r128_lr5e-4_1b  LoRA  128  5e-4  0.0  meta-llama/Llama-3.2-1B
+lora_r128_lr1e-3_1b  LoRA  128  1e-3  0.0  meta-llama/Llama-3.2-1B
+cera_r64_lr1e-4_3b   CeRA  64   1e-4  0.1  meta-llama/Llama-3.2-3B
+cera_r64_lr3e-4_3b   CeRA  64   3e-4  0.1  meta-llama/Llama-3.2-3B
+cera_r64_lr5e-4_3b   CeRA  64   5e-4  0.1  meta-llama/Llama-3.2-3B
+cera_r64_lr1e-3_3b   CeRA  64   1e-3  0.1  meta-llama/Llama-3.2-3B
+cera_r128_lr1e-4_3b  CeRA  128  1e-4  0.1  meta-llama/Llama-3.2-3B
+cera_r128_lr3e-4_3b  CeRA  128  3e-4  0.1  meta-llama/Llama-3.2-3B
+cera_r128_lr5e-4_3b  CeRA  128  5e-4  0.1  meta-llama/Llama-3.2-3B
+cera_r128_lr1e-3_3b  CeRA  128  1e-3  0.1  meta-llama/Llama-3.2-3B
+lora_r64_lr1e-4_3b   LoRA  64   1e-4  0.0  meta-llama/Llama-3.2-3B
+lora_r64_lr3e-4_3b   LoRA  64   3e-4  0.0  meta-llama/Llama-3.2-3B
+lora_r64_lr5e-4_3b   LoRA  64   5e-4  0.0  meta-llama/Llama-3.2-3B
+lora_r64_lr1e-3_3b   LoRA  64   1e-3  0.0  meta-llama/Llama-3.2-3B
+lora_r128_lr1e-4_3b  LoRA  128  1e-4  0.0  meta-llama/Llama-3.2-3B
+lora_r128_lr3e-4_3b  LoRA  128  3e-4  0.0  meta-llama/Llama-3.2-3B
+lora_r128_lr5e-4_3b  LoRA  128  5e-4  0.0  meta-llama/Llama-3.2-3B
+lora_r128_lr1e-3_3b  LoRA  128  1e-3  0.0  meta-llama/Llama-3.2-3B
