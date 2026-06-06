@@ -28,7 +28,7 @@
 
 MODEL_TYPE=${1:-CeRA}
 RANK=${2:-128}
-LR=${3:-5e-4}
+LR=${3:-best}
 DROPOUT=${4:-0.1}
 DATASET=${5:-math}
 EPOCHS=${6:-3}

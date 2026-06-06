@@ -31,24 +31,24 @@ HF_TOKEN=hf_...
 ### Training
 
 ```bash
-# CeRA on MathInstruct (Llama-3.1-8B, rank=128, lr=5e-4)
+# CeRA on MathInstruct (Llama-3.1-8B, rank=128, best LR=1e-3)
 python train.py \
-    --model_type CeRA --rank 128 --lr 5e-4 --dropout 0.1 \
+    --model_type CeRA --rank 128 --lr 1e-3 --dropout 0.1 \
     --dataset math --epochs 3
 
-# LoRA baseline
+# LoRA baseline (best LR=3e-4)
 python train.py \
-    --model_type LoRA --rank 128 --lr 5e-4 --dropout 0.0 \
+    --model_type LoRA --rank 128 --lr 3e-4 --dropout 0.0 \
     --dataset math --epochs 3
 
-# DoRA baseline
+# DoRA baseline (best LR=3e-4)
 python train.py \
-    --model_type DoRA --rank 128 --lr 5e-4 \
+    --model_type DoRA --rank 128 --lr 3e-4 \
     --dataset math --epochs 3
 
 # Different base model (e.g. Llama-3.2-3B)
 python train.py \
-    --model_type CeRA --rank 128 --lr 5e-4 --dropout 0.1 \
+    --model_type CeRA --rank 128 --lr 1e-3 --dropout 0.1 \
     --dataset math --epochs 3 \
     --base_model meta-llama/Llama-3.2-3B
 ```
@@ -96,7 +96,7 @@ python evaluate.py \
 | `--target_modules` | `q_proj,v_proj` | Comma-separated projection names |
 | `--dataset` | `math` | `math`, `code`, `orca` |
 | `--epochs` | `3` | Training epochs |
-| `--lr` | `5e-4` | AdamW learning rate |
+| `--lr` | — | AdamW learning rate (use sweep-selected best: CeRA R64→3e-4, CeRA R128→1e-3, LoRA/DoRA→3e-4) |
 
 ### evaluate.py
 
