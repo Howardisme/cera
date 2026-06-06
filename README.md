@@ -175,23 +175,35 @@ Generic Slurm job wrappers are in `slurm/`. Before submitting, edit each script 
 2. Activate your environment: `conda activate cera_env`
 
 ```bash
-sbatch slurm/run_train.sh CeRA 128 5e-4 0.1 math 3
-sbatch slurm/run_eval.sh  my_cell CeRA 128 5e-4 0.1
+sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
+sbatch slurm/run_eval.sh  my_cell CeRA 128 best 0.1
 ```
 
 Pass `best` as the LR argument to automatically use the sweep-selected optimum
-for each method/rank combination:
+for each method/rank combination (Llama-3.1-8B; 1B/3B best LRs are TBD):
 
-| Method | Rank | Best LR |
-|--------|------|---------|
-| CeRA   | 64   | 3e-4    |
-| CeRA   | 128  | 1e-3    |
-| LoRA   | 64 / 128 / 512 | 3e-4    |
-| DoRA   | 64 / 128 / 512 | 3e-4    |
+| Method | Rank           | Best LR (8B) |
+|--------|----------------|--------------|
+| CeRA   | 64             | 3e-4         |
+| CeRA   | 128            | 1e-3         |
+| LoRA   | 64 / 128 / 512 | 3e-4         |
+| DoRA   | 64 / 128 / 512 | 3e-4         |
+
+### Large sweeps with job arrays
+
+For multi-cell sweeps (e.g. LR sweep across model sizes), use the array scripts
+so all tasks are submitted as two jobs and SLURM auto-fills slots as they open:
 
 ```bash
-sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
-sbatch slurm/run_eval.sh  my_cell CeRA 128 best 0.1
+# Submit all tasks in slurm/configs/sweep_1b3b.txt (32 cells, max 5 concurrent)
+TRAIN_JOB=$(sbatch --parsable --array=1-32%5 slurm/run_train_array.sh slurm/configs/sweep_1b3b.txt)
+sbatch --array=1-32%5 --dependency=aftercorr:$TRAIN_JOB slurm/run_eval_array.sh slurm/configs/sweep_1b3b.txt
+```
+
+Config file format (`slurm/configs/*.txt`):
+```
+# CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL
+cera_r64_lr3e-4_1b  CeRA  64  3e-4  0.1  meta-llama/Llama-3.2-1B
 ```
 
 ## Citation

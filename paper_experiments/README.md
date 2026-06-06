@@ -48,3 +48,20 @@ bash paper_experiments/submit_main_comparison.sh             # submit
 - Set `HF_TOKEN` in your `.env` file (required to download gated Llama models)
 - Fill in your cluster account in `slurm/run_train.sh`, `slurm/run_eval.sh`, `slurm/run_analysis.sh`
 - Activate your conda/venv environment in the slurm scripts
+- `accelerate` must be installed (`pip install accelerate`); it is listed in `requirements.txt` but not always present in base environments
+
+## 1B / 3B LR Sweep
+
+Best LRs for Llama-3.2-1B and Llama-3.2-3B are determined via a separate sweep
+before running `submit_model_scale.sh`. Use the job array scripts:
+
+```bash
+TRAIN_JOB=$(sbatch --parsable --array=1-32%5 --partition=8gpus \
+    slurm/run_train_array.sh slurm/configs/sweep_1b3b.txt)
+sbatch --array=1-32%5 --partition=8gpus --dependency=aftercorr:$TRAIN_JOB \
+    slurm/run_eval_array.sh slurm/configs/sweep_1b3b.txt
+```
+
+After the sweep completes, identify the best LR per method/rank from
+`results/eval_outputs/` and update `slurm/run_train_array.sh` before running
+`submit_model_scale.sh`.
