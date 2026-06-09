@@ -180,13 +180,13 @@ sbatch slurm/run_eval.sh  my_cell CeRA 128 best 0.1
 ```
 
 Pass `best` as the LR argument to automatically use the sweep-selected optimum
-for each method/rank combination (Llama-3.1-8B; 3B best LRs are TBD):
+for each method/rank combination (Llama-3.1-8B; Llama-3.2-1B; Llama-3.2-3B):
 
-| Method | Rank     | Best LR (8B) | Best LR (1B) |
-|--------|----------|--------------|--------------|
-| CeRA   | 64 / 128 | 3e-4 / 1e-3  | 3e-4         |
-| LoRA   | 64 / 128 | 3e-4         | 3e-4 / 5e-4  |
-| DoRA   | 64 / 128 | 3e-4         | TBD          |
+| Method | Rank     | Best LR (8B) | Best LR (1B) | Best LR (3B) |
+|--------|----------|--------------|--------------|--------------|
+| CeRA   | 64 / 128 | 3e-4 / 1e-3  | 3e-4         | TBD          |
+| LoRA   | 64 / 128 | 3e-4         | 3e-4 / 5e-4  | TBD          |
+| DoRA   | 64 / 128 | 3e-4         | TBD          | TBD          |
 
 ### Large sweeps with job arrays
 
