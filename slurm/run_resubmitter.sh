@@ -2,10 +2,11 @@
 #SBATCH --job-name=cera_resub
 #SBATCH --nodes=1
 #SBATCH --cpus-per-task=1
+#SBATCH --gres=gpu:1
 #SBATCH --time=00:10:00
 #SBATCH --output=slurm_logs/resub_%j.log
 #SBATCH --error=slurm_logs/resub_err_%j.log
-#SBATCH --partition=normal
+#SBATCH --partition=8gpus
 # NOTE: Add your cluster account line here, e.g.:
 #   #SBATCH -A YOUR_ACCOUNT
 
@@ -32,7 +33,7 @@ END=${3:?END required}
 TOTAL=${4:?TOTAL required}
 BATCH_SIZE=${5:-5}
 PARTITION=${6:-8gpus}
-RESUB_PARTITION=${7:-dev}
+RESUB_PARTITION=${7:-8gpus}
 
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
