@@ -15,15 +15,16 @@
 #
 # Usage (called automatically — do not invoke directly):
 #   sbatch --dependency=afterok:<PREV_TRAIN_JOB> slurm/run_resubmitter.sh \
-#       CONFIG_FILE START END TOTAL BATCH_SIZE PARTITION
+#       CONFIG_FILE START END TOTAL BATCH_SIZE PARTITION [RESUB_PARTITION]
 #
 # Arguments:
-#   CONFIG_FILE   path to the array config file
-#   START         first task ID of the next batch (1-indexed)
-#   END           last task ID of the next batch
-#   TOTAL         total number of tasks in the config
-#   BATCH_SIZE    number of tasks per batch (default: 5)
-#   PARTITION     SLURM partition to use
+#   CONFIG_FILE      path to the array config file
+#   START            first task ID of the next batch (1-indexed)
+#   END              last task ID of the next batch
+#   TOTAL            total number of tasks in the config
+#   BATCH_SIZE       number of tasks per batch (default: 5)
+#   PARTITION        SLURM partition for experiment (GPU) jobs
+#   RESUB_PARTITION  SLURM partition for this resubmitter (CPU-only, default: dev)
 
 CONFIG_FILE=${1:?CONFIG_FILE required}
 START=${2:?START required}
@@ -31,6 +32,7 @@ END=${3:?END required}
 TOTAL=${4:?TOTAL required}
 BATCH_SIZE=${5:-5}
 PARTITION=${6:-8gpus}
+RESUB_PARTITION=${7:-dev}
 
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
@@ -49,9 +51,9 @@ if [ "$NEXT_START" -le "$TOTAL" ]; then
     NEXT_END=$((NEXT_START + BATCH_SIZE - 1))
     [ "$NEXT_END" -gt "$TOTAL" ] && NEXT_END=$TOTAL
     RESUB_JOB=$(sbatch --parsable \
-        --partition=${PARTITION} \
-        --dependency=afterok:${EXP_JOB} \
-        slurm/run_resubmitter.sh "$CONFIG_FILE" "$NEXT_START" "$NEXT_END" "$TOTAL" "$BATCH_SIZE" "$PARTITION")
+        --partition=${RESUB_PARTITION} \
+        --dependency=afterany:${EXP_JOB} \
+        slurm/run_resubmitter.sh "$CONFIG_FILE" "$NEXT_START" "$NEXT_END" "$TOTAL" "$BATCH_SIZE" "$PARTITION" "$RESUB_PARTITION")
     echo "[RESUB] Next resubmitter job: $RESUB_JOB (tasks ${NEXT_START}-${NEXT_END})"
 else
     echo "[RESUB] All ${TOTAL} tasks submitted."
