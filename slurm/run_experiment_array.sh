@@ -23,7 +23,8 @@
 #   sbatch --dependency=afterok:$BATCH_JOB slurm/run_resubmitter.sh CONFIG 9 16 TOTAL 8 PARTITION
 #
 # CONFIG_FILE format (one experiment per line, # lines are ignored):
-#   CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL
+#   CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  [DATASET]
+# DATASET defaults to "math" if omitted.
 
 CONFIG_FILE=${1:?CONFIG_FILE argument required}
 
@@ -41,9 +42,10 @@ if [ -z "$LINE" ]; then
     exit 1
 fi
 
-read -r CELL_ID METHOD RANK LR DROPOUT BASE_MODEL <<< "$LINE"
+read -r CELL_ID METHOD RANK LR DROPOUT BASE_MODEL DATASET <<< "$LINE"
+DATASET=${DATASET:-math}
 
-echo "[START] Task ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} dropout=${DROPOUT} model=${BASE_MODEL}"
+echo "[START] Task ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} dropout=${DROPOUT} dataset=${DATASET} model=${BASE_MODEL}"
 
 # ── 1. Train ──────────────────────────────────────────────────────────────────
 python train.py \
@@ -51,7 +53,7 @@ python train.py \
     --rank        "$RANK" \
     --lr          "$LR" \
     --dropout     "$DROPOUT" \
-    --dataset     math \
+    --dataset     "$DATASET" \
     --epochs      3 \
     --base_model  "$BASE_MODEL"
 

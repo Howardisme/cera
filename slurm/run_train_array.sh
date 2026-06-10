@@ -41,16 +41,17 @@ if [ -z "$LINE" ]; then
     exit 1
 fi
 
-read -r CELL_ID METHOD RANK LR DROPOUT BASE_MODEL <<< "$LINE"
+read -r CELL_ID METHOD RANK LR DROPOUT BASE_MODEL DATASET <<< "$LINE"
+DATASET=${DATASET:-math}
 
-echo "[START] Array job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} dropout=${DROPOUT} model=${BASE_MODEL}"
+echo "[START] Array job ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} dropout=${DROPOUT} dataset=${DATASET} model=${BASE_MODEL}"
 
 python train.py \
     --model_type  "$METHOD" \
     --rank        "$RANK" \
     --lr          "$LR" \
     --dropout     "$DROPOUT" \
-    --dataset     math \
+    --dataset     "$DATASET" \
     --epochs      3 \
     --base_model  "$BASE_MODEL"
 

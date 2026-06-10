@@ -16,9 +16,10 @@
 #   sbatch slurm/run_analysis.sh ANALYSIS_TYPE [args...]
 #
 # ANALYSIS_TYPE:
-#   svd        -- SVD spectrum analysis (analyze_svd.py)
-#   er         -- Effective Rank trajectory (analyze_er.py)
-#   benchmark  -- Throughput/latency benchmark (benchmark.py)
+#   svd            -- SVD spectrum analysis (analyze_svd.py)
+#   er             -- Effective Rank trajectory (analyze_er.py)
+#   benchmark      -- Throughput/latency benchmark (benchmark.py)
+#   rank_scaling   -- PPL + manifold dimensionality vs rank (plot_rank_scaling.py)
 #
 # All additional arguments are forwarded to the corresponding Python script.
 #
@@ -56,8 +57,11 @@ case "$ANALYSIS_TYPE" in
     benchmark)
         python analysis/benchmark.py "$@"
         ;;
+    rank_scaling)
+        python analysis/plot_rank_scaling.py "$@"
+        ;;
     *)
-        echo "[ERROR] Unknown analysis type: ${ANALYSIS_TYPE}. Choose from svd, er, benchmark."
+        echo "[ERROR] Unknown analysis type: ${ANALYSIS_TYPE}. Choose from svd, er, benchmark, rank_scaling."
         exit 1
         ;;
 esac
