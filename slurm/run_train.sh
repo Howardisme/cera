@@ -34,21 +34,31 @@ DATASET=${5:-math}
 EPOCHS=${6:-3}
 BASE_MODEL=${7:-meta-llama/Llama-3.1-8B}
 
-# Best LR per method/rank, selected from a grid search over {1e-4, 3e-4, 5e-4, 1e-3}.
-# CeRA R=64:  3e-4 — low-rank CeRA benefits from a moderate LR; 5e-4 overshot, 1e-4 underfit.
-# CeRA R=128: 1e-3 — larger rank provides more capacity and tolerates a higher LR without diverging.
-# LoRA:       3e-4 — standard LoRA is sensitive to LR; 3e-4 consistently outperforms 5e-4 across ranks.
+MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
+
+# Best LR per model/method/rank from grid search over {1e-4, 3e-4, 5e-4, 1e-3}.
+# 8B: CeRA R64→3e-4, CeRA R128→1e-3, LoRA/DoRA (any rank)→3e-4
+# 1B: CeRA R64→3e-4, CeRA R128→3e-4, LoRA R64→3e-4, LoRA R128→5e-4
+# 3B: CeRA R64→3e-4, CeRA R128→5e-4, LoRA R64→3e-4, LoRA R128→5e-4
 if [ "$LR" = "best" ]; then
-    case "${MODEL_TYPE}_${RANK}" in
-        CeRA_64)  LR="3e-4" ;;
-        CeRA_128) LR="1e-3" ;;
-        LoRA_*)   LR="3e-4" ;;
-        DoRA_*)   LR="3e-4" ;;
+    case "${MODEL_TAG}_${MODEL_TYPE}_${RANK}" in
+        Llama-3.2-1B_CeRA_64)   LR="3e-4" ;;
+        Llama-3.2-1B_CeRA_128)  LR="3e-4" ;;
+        Llama-3.2-1B_LoRA_64)   LR="3e-4" ;;
+        Llama-3.2-1B_LoRA_128)  LR="5e-4" ;;
+        Llama-3.2-3B_CeRA_64)   LR="3e-4" ;;
+        Llama-3.2-3B_CeRA_128)  LR="5e-4" ;;
+        Llama-3.2-3B_LoRA_64)   LR="3e-4" ;;
+        Llama-3.2-3B_LoRA_128)  LR="5e-4" ;;
+        *_CeRA_64)               LR="3e-4" ;;
+        *_CeRA_128)              LR="1e-3" ;;
+        *_LoRA_*)                LR="3e-4" ;;
+        *_DoRA_*)                LR="3e-4" ;;
         *)
-            echo "[ERROR] No best LR defined for METHOD=${MODEL_TYPE} RANK=${RANK}. Pass LR explicitly."
+            echo "[ERROR] No best LR defined for MODEL=${MODEL_TAG} METHOD=${MODEL_TYPE} RANK=${RANK}. Pass LR explicitly."
             exit 1 ;;
     esac
-    echo "[INFO] Resolved LR=best → ${LR} for ${MODEL_TYPE} R=${RANK}"
+    echo "[INFO] Resolved LR=best → ${LR} for ${MODEL_TAG} ${MODEL_TYPE} R=${RANK}"
 fi
 
 # Activate your environment here, e.g.:

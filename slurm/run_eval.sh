@@ -55,22 +55,31 @@ cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
 METHOD_LOWER=$(echo "$METHOD" | tr '[:upper:]' '[:lower:]')
+MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
 
-# Best LR per method/rank, selected from a grid search over {1e-4, 3e-4, 5e-4, 1e-3}.
-# CeRA R=64:  3e-4 — low-rank CeRA benefits from a moderate LR; 5e-4 overshot, 1e-4 underfit.
-# CeRA R=128: 1e-3 — larger rank provides more capacity and tolerates a higher LR without diverging.
-# LoRA:       3e-4 — standard LoRA is sensitive to LR; 3e-4 consistently outperforms 5e-4 across ranks.
+# Best LR per model/method/rank from grid search over {1e-4, 3e-4, 5e-4, 1e-3}.
+# 8B: CeRA R64→3e-4, CeRA R128→1e-3, LoRA/DoRA (any rank)→3e-4
+# 1B: CeRA R64→3e-4, CeRA R128→3e-4, LoRA R64→3e-4, LoRA R128→5e-4
+# 3B: CeRA R64→3e-4, CeRA R128→5e-4, LoRA R64→3e-4, LoRA R128→5e-4
 if [ "$LR" = "best" ]; then
-    case "${METHOD}_${RANK}" in
-        CeRA_64)  LR="3e-4" ;;
-        CeRA_128) LR="1e-3" ;;
-        LoRA_*)   LR="3e-4" ;;
-        DoRA_*)   LR="3e-4" ;;
+    case "${MODEL_TAG}_${METHOD}_${RANK}" in
+        Llama-3.2-1B_CeRA_64)   LR="3e-4" ;;
+        Llama-3.2-1B_CeRA_128)  LR="3e-4" ;;
+        Llama-3.2-1B_LoRA_64)   LR="3e-4" ;;
+        Llama-3.2-1B_LoRA_128)  LR="5e-4" ;;
+        Llama-3.2-3B_CeRA_64)   LR="3e-4" ;;
+        Llama-3.2-3B_CeRA_128)  LR="5e-4" ;;
+        Llama-3.2-3B_LoRA_64)   LR="3e-4" ;;
+        Llama-3.2-3B_LoRA_128)  LR="5e-4" ;;
+        *_CeRA_64)               LR="3e-4" ;;
+        *_CeRA_128)              LR="1e-3" ;;
+        *_LoRA_*)                LR="3e-4" ;;
+        *_DoRA_*)                LR="3e-4" ;;
         *)
-            echo "[ERROR] No best LR defined for METHOD=${METHOD} RANK=${RANK}. Pass LR explicitly."
+            echo "[ERROR] No best LR defined for MODEL=${MODEL_TAG} METHOD=${METHOD} RANK=${RANK}. Pass LR explicitly."
             exit 1 ;;
     esac
-    echo "[INFO] Resolved LR=best → ${LR} for ${METHOD} R=${RANK}"
+    echo "[INFO] Resolved LR=best → ${LR} for ${MODEL_TAG} ${METHOD} R=${RANK}"
 fi
 
 # Convert LR to decimal directory format
@@ -85,7 +94,6 @@ esac
 # Find the most recent matching results/ directory.
 # train.py appends _{MODEL_TAG} only for non-default models, so we must
 # filter by model size to avoid picking up a checkpoint from a different model.
-MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
 DEFAULT_MODEL_TAG="Llama-3.1-8B"
 if [ "$MODEL_TAG" = "$DEFAULT_MODEL_TAG" ]; then
     # Default model dirs have no model-size suffix → exclude any non-default model dir
