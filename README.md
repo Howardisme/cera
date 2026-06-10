@@ -1,16 +1,12 @@
 # CeRA: Capacity-enhanced Rank Adaptation
 
-CeRA is a parameter-efficient fine-tuning (PEFT) method that overcomes LoRA's
-"linear ceiling" by replacing the low-rank linear delta with a non-linear
-parallel branch:
+CeRA is a parameter-efficient fine-tuning (PEFT) method that overcomes LoRA's "linear ceiling" by replacing the low-rank linear delta with a non-linear parallel branch:
 
 ```
 output = W_0(x)  +  down_proj( Dropout( SiLU( up_proj(x) ) ) )
 ```
 
-Because of the non-linearity, CeRA can express functions outside the column span
-of the frozen weight matrix W_0, giving the adapter access to the full output
-space rather than only a low-dimensional subspace.
+Because of the non-linearity, CeRA can express functions outside the column span of the frozen weight matrix W_0, giving the adapter access to the full output space rather than only a low-dimensional subspace.
 
 ## Installation
 
@@ -159,8 +155,7 @@ python analysis/compare_generations.py \
 
 ## Reproducing Paper Results
 
-See [`paper_experiments/README.md`](paper_experiments/README.md) for a complete
-guide to reproducing all tables and figures from the paper using Slurm.
+See [`paper_experiments/README.md`](paper_experiments/README.md) for a complete guide to reproducing all tables and figures from the paper using Slurm.
 
 ```bash
 bash paper_experiments/submit_main_comparison.sh --dry-run  # preview
@@ -179,8 +174,7 @@ sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
 sbatch slurm/run_eval.sh  my_cell CeRA 128 best 0.1
 ```
 
-Pass `best` as the LR argument to automatically use the sweep-selected optimum
-for each method/rank combination (Llama-3.1-8B; Llama-3.2-1B; Llama-3.2-3B):
+Pass `best` as the LR argument to automatically use the sweep-selected optimum for each method/rank combination (Llama-3.1-8B; Llama-3.2-1B; Llama-3.2-3B):
 
 | Method | Rank | Best LR (8B) | Best LR (1B) | Best LR (3B) |
 |--------|------|--------------|--------------|--------------|
@@ -193,8 +187,7 @@ for each method/rank combination (Llama-3.1-8B; Llama-3.2-1B; Llama-3.2-3B):
 
 ### Large sweeps with job arrays
 
-For multi-cell sweeps (e.g. LR sweep across model sizes), use the array scripts
-so all tasks are submitted as two jobs and SLURM auto-fills slots as they open:
+For multi-cell sweeps (e.g. LR sweep across model sizes), use the array scripts so all tasks are submitted as two jobs and SLURM auto-fills slots as they open:
 
 ```bash
 # Submit all tasks in slurm/configs/sweep_1b3b.txt (32 cells, max 5 concurrent)
@@ -212,7 +205,7 @@ cera_r64_lr3e-4_1b  CeRA  64  3e-4  0.1  meta-llama/Llama-3.2-1B
 
 ```bibtex
 @inproceedings{chen26cera,
-  title   = {CeRA: Overcoming the Linear Ceiling of Low-Rank Adaptation via Capacity Expansion},
+  title   = {CeRA: Breaking the Linear Ceiling of Low-Rank Adaptation with Inference-Time Non-linearity},
   author  = {Hung-Hsuan Chen},
   year    = {2026},
   journal={arXiv preprint arXiv:2602.22911}
