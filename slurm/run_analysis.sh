@@ -6,7 +6,7 @@
 #SBATCH --time=12:00:00
 #SBATCH --output=slurm_logs/analysis_%j.log
 #SBATCH --error=slurm_logs/analysis_err_%j.log
-#SBATCH --partition=normal
+#SBATCH --partition=8gpus
 # NOTE: Add your cluster account line here, e.g.:
 #   #SBATCH -A YOUR_ACCOUNT
 
