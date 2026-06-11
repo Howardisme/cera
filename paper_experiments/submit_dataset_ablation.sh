@@ -42,19 +42,21 @@ submit_train() {
 }
 
 submit_eval() {
-    local cell_id=$1; local method=$2; local dropout=$3; local dep=$4
+    local cell_id=$1; local method=$2; local dropout=$3; local dataset=$4; local dep=$5
     if eval_done "$cell_id"; then
         echo "[SKIP] ${cell_id}: all eval outputs exist" >&2
         return
     fi
     local dep_arg=""
     [ -n "$dep" ] && dep_arg="--dependency=afterok:${dep}"
+    # DATASET (8th arg) makes run_eval.sh search the matching training dir;
+    # without it, orca cells would silently pick up a math-trained checkpoint.
     if [ "$DRY_RUN" -eq 1 ]; then
-        echo "[DRY] sbatch $dep_arg slurm/run_eval.sh $cell_id $method $RANK $LR $dropout $BASE_MODEL $EVAL_BASE" >&2
+        echo "[DRY] sbatch $dep_arg slurm/run_eval.sh $cell_id $method $RANK $LR $dropout $BASE_MODEL $EVAL_BASE $dataset" >&2
         return
     fi
     sbatch $dep_arg slurm/run_eval.sh \
-        "$cell_id" "$method" "$RANK" "$LR" "$dropout" "$BASE_MODEL" "$EVAL_BASE"
+        "$cell_id" "$method" "$RANK" "$LR" "$dropout" "$BASE_MODEL" "$EVAL_BASE" "$dataset"
 }
 
 handle_cell() {
@@ -63,7 +65,7 @@ handle_cell() {
     local train_jid
     train_jid=$(submit_train "$method" "$dropout" "$dataset")
     echo "  Train job ID: ${train_jid}" >&2
-    submit_eval "$cell_id" "$method" "$dropout" "$train_jid"
+    submit_eval "$cell_id" "$method" "$dropout" "$dataset" "$train_jid"
 }
 
 echo "======================================================"

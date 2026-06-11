@@ -19,7 +19,8 @@
 #   %5        max 5 tasks running concurrently (adjust to your QOS limit)
 #
 # CONFIG_FILE format (one experiment per line, # lines are ignored):
-#   CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL
+#   CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  [DATASET]
+# DATASET defaults to "math" if omitted.
 #
 # Example:
 #   sbatch --array=1-32%5 slurm/run_train_array.sh slurm/configs/sweep_1b3b.txt

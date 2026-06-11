@@ -18,7 +18,8 @@
 #   sbatch --array=1-N%5 --dependency=aftercorr:$TRAIN_JOB slurm/run_eval_array.sh CONFIG_FILE
 #
 # CONFIG_FILE format (one experiment per line, # lines are ignored):
-#   CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL
+#   CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  [DATASET]
+# DATASET defaults to "math" if omitted.
 #
 # Example:
 #   TRAIN_JOB=$(sbatch --parsable --array=1-32%5 slurm/run_train_array.sh slurm/configs/sweep_1b3b.txt)
@@ -41,9 +42,10 @@ if [ -z "$LINE" ]; then
     exit 1
 fi
 
-read -r CELL_ID METHOD RANK LR DROPOUT BASE_MODEL <<< "$LINE"
+read -r CELL_ID METHOD RANK LR DROPOUT BASE_MODEL DATASET <<< "$LINE"
+DATASET=${DATASET:-math}
 
-echo "[START] Eval array ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} dropout=${DROPOUT} model=${BASE_MODEL}"
+echo "[START] Eval array ${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID} | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} dropout=${DROPOUT} dataset=${DATASET} model=${BASE_MODEL}"
 
 # Delegate to the single-cell eval script (handles checkpoint search + all 3 evals)
-bash slurm/run_eval.sh "$CELL_ID" "$METHOD" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL"
+bash slurm/run_eval.sh "$CELL_ID" "$METHOD" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" results/eval_outputs "$DATASET"

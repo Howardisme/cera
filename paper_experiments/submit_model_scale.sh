@@ -2,7 +2,9 @@
 # Submit training + eval jobs for the model scale experiment.
 #
 # Experiment: CeRA / LoRA / DoRA x R={64,128} on Llama-3.2-1B, 3B, and 8B
-# LR: 5e-4 (best from main comparison)  |  Dataset: MathInstruct
+# LR: "best" -- resolved per model/method/rank by the lookup tables in
+#     slurm/run_train.sh / slurm/run_eval.sh (filled from the LR sweeps).
+# Dataset: MathInstruct
 # Eval: MATH pass@1 (greedy, 500), MATH pass@10 (n=10, 500), GSM8K pass@1 (1319)
 #
 # Usage:
@@ -20,7 +22,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${SCRIPT_DIR}/.."
 mkdir -p slurm_logs results/eval_outputs
 
-LR="5e-4"
+LR="best"
 EVAL_BASE="results/eval_outputs"
 
 get_dropout() {
