@@ -8,10 +8,18 @@ representational subspace evolves during fine-tuning.
 
 Modes
 -----
-  manifold       CeRA vs LoRA -- Manifold Expansion experiment
-  lr_sensitivity LoRA vs CeRA (low-LR) vs CeRA (high-LR)
-  dropout        CeRA (D=0) vs CeRA (D=0.3) -- Plasticity Control
+  manifold       [DEPRECATED] CeRA vs LoRA -- Manifold Expansion experiment
+  lr_sensitivity [DEPRECATED] LoRA vs CeRA (low-LR) vs CeRA (high-LR)
+  dropout        [DEPRECATED] CeRA (D=0) vs CeRA (D=0.3) -- Plasticity Control
   ablation       CeRA variants (activation fn, target modules, dropout)
+
+DEPRECATION: the trajectory modes (manifold, lr_sensitivity, dropout) load
+legacy per-data-count checkpoints ({type}_ckpt_{1000,10000,...}.pt), which the
+current trainer no longer saves -- it keeps only *_ckpt_best_*.pt and
+*_ckpt_final_*.pt. On new runs these modes find no checkpoints and emit an
+empty CSV. For ER-vs-rank figures (paper Fig. 3/4), use:
+    python analysis/plot_rank_scaling.py --metric er --svd_json <spectra.json>
+which computes ER directly from the analyze_svd.py spectrum output.
 
 Output: CSV rows to stdout  ->  redirect with  | tee results/er_manifold.csv
 
@@ -156,6 +164,13 @@ def _run_analysis(
 
     CSV header:  data_seen, label, effective_rank, manifold_dim
     """
+    print(
+        "# DEPRECATED: this trajectory mode needs legacy per-data-count "
+        "checkpoints ({type}_ckpt_{N}.pt), which the current trainer no longer "
+        "saves. New runs will produce no rows below. "
+        "Use plot_rank_scaling.py --metric er instead.",
+        file=sys.stderr,
+    )
     print("data_seen,label,effective_rank,manifold_dim")
 
     target_modules = ["q_proj", "v_proj"]

@@ -8,8 +8,8 @@
 #   1. Train CeRA and LoRA on SlimOrca across ranks (per config) -- for Fig. 1 left
 #   2. SVD spectrum analysis on those checkpoints              -- for Fig. 1 right
 #   3. plot_rank_scaling.py: PPL + manifold dim vs rank        -- Fig. 1 output
-#   4. SVD spectrum batch analysis across all math experiments -- Fig. 2/3
-#   5. ER trajectory: manifold expansion (CeRA vs LoRA R64)   -- Fig. 2/3
+#   4. SVD spectrum batch analysis across all math experiments -- Fig. 4
+#   5. Effective Rank vs rank plots from the spectrum JSONs    -- Fig. 3/4
 #
 # Usage:
 #   bash paper_experiments/submit_spectral.sh [--dry-run]
@@ -35,11 +35,6 @@ RANK_SCALING_OUT="results/rank_scaling.pdf"
 # for the SVD/plot/ER jobs below). If the config grows beyond this, the SVD
 # job can no longer be chained correctly at submit time -- see check below.
 BATCH_LIMIT=8
-
-# -- Edit these paths to your best math checkpoints -----------------------
-CERA_R64_PATH="results/Exp_CeRA_math_R64_lr0.0003_silu_q_proj_v_proj_D0.1_E3_*/CeRA"
-LORA_R64_PATH="results/Exp_LoRA_math_R64_lr0.0003_silu_q_proj_v_proj_D0.0_E3_*/LoRA"
-# -------------------------------------------------------------------------
 
 echo "======================================================"
 echo " Spectral Analysis + Rank Scaling (Fig. 1)"
@@ -121,34 +116,37 @@ else
     echo "[SUBMIT] SVD (math) -> job ${SVD_MATH_JID}"
 fi
 
-# ── 5. ER trajectory: manifold expansion ─────────────────────────────────────
+# ── 5. Effective Rank vs rank plots (Fig. 3 right, Fig. 4) ───────────────────
+# ER is computed directly from the SVD spectrum JSONs; no model forward needed.
+# (The old analyze_er.py trajectory mode is deprecated -- it required legacy
+# per-data-count checkpoints that the trainer no longer saves.)
 echo ""
-echo "--- Submitting ER trajectory (manifold expansion) ---"
-CERA_RESOLVED=$(ls -d ${CERA_R64_PATH} 2>/dev/null | head -1)
-LORA_RESOLVED=$(ls -d ${LORA_R64_PATH} 2>/dev/null | head -1)
-
-if [ -z "$CERA_RESOLVED" ] || [ -z "$LORA_RESOLVED" ]; then
-    echo "[WARN] CeRA or LoRA R64 math path not found -- update CERA_R64_PATH / LORA_R64_PATH."
-    echo "  CeRA: ${CERA_RESOLVED:-NOT FOUND}"
-    echo "  LoRA: ${LORA_RESOLVED:-NOT FOUND}"
+echo "--- Submitting ER vs rank plots ---"
+if [ "$DRY_RUN" -eq 1 ]; then
+    echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh rank_scaling --metric er --svd_json ${SVD_ORCA_JSON} --output results/rank_scaling_er_orca.pdf"
+    echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh rank_scaling --metric er --svd_json results/svd_spectra.json --output results/rank_scaling_er_math.pdf"
 else
-    if [ "$DRY_RUN" -eq 1 ]; then
-        echo "[DRY] sbatch slurm/run_analysis.sh er --mode manifold --rank 64 --cera_path $CERA_RESOLVED --lora_path $LORA_RESOLVED"
-    else
-        ER_JID=$(sbatch --parsable \
-            slurm/run_analysis.sh er \
-            --mode manifold \
-            --rank 64 \
-            --base_model "$BASE_MODEL" \
-            --cera_path "$CERA_RESOLVED" \
-            --lora_path "$LORA_RESOLVED")
-        echo "[SUBMIT] ER manifold expansion -> job ${ER_JID}"
-    fi
+    ER_ORCA_JID=$(sbatch --parsable \
+        --dependency=afterany:${SVD_JOB} \
+        slurm/run_analysis.sh rank_scaling \
+        --metric er \
+        --svd_json "$SVD_ORCA_JSON" \
+        --output results/rank_scaling_er_orca.pdf)
+    echo "[SUBMIT] ER vs rank (orca) -> job ${ER_ORCA_JID}"
+
+    ER_MATH_JID=$(sbatch --parsable \
+        --dependency=afterany:${SVD_MATH_JID} \
+        slurm/run_analysis.sh rank_scaling \
+        --metric er \
+        --svd_json results/svd_spectra.json \
+        --output results/rank_scaling_er_math.pdf)
+    echo "[SUBMIT] ER vs rank (math) -> job ${ER_MATH_JID}"
 fi
 
 echo ""
 echo "======================================================"
 echo " Submission complete. Monitor with: squeue -u \$USER"
 echo " Fig. 1 output: ${RANK_SCALING_OUT}"
+echo " ER plots:      results/rank_scaling_er_orca.pdf, results/rank_scaling_er_math.pdf"
 echo " SVD spectra:   ${SVD_ORCA_JSON}, results/svd_spectra.json"
 echo "======================================================"

@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """
-plot_rank_scaling.py -- Rank Scaling: PPL and Manifold Dimensionality vs Adapter Rank.
+plot_rank_scaling.py -- Rank Scaling: PPL, Manifold Dimensionality, and
+Effective Rank vs Adapter Rank.
 
-Reads training logs (for PPL) and/or an SVD spectrum JSON (for manifold
-dimensionality at 90% variance) and plots how each metric scales with
-adapter rank for CeRA vs LoRA.
+Reads training logs (for PPL) and/or an SVD spectrum JSON (for the spectral
+metrics) and plots how each metric scales with adapter rank for CeRA vs LoRA.
 
 Metrics
 -------
   ppl       Final test-set perplexity from training logs (requires --results_dir)
   manifold  Manifold dimensionality at --threshold variance (requires --svd_json)
+  er        Effective Rank, Roy & Vetterli 2007 (requires --svd_json)
   both      Side-by-side subplots of ppl and manifold
+
+Note on `er`: the spectrum stored by analyze_svd.py is averaged across the
+tracked layers/projections, so the value here is the ER of the layer-averaged
+spectrum, not the average of per-layer ERs. The two differ slightly; trends
+across ranks are unaffected.
 
 Usage
 -----
@@ -20,8 +26,8 @@ Usage
       --metric both --output results/rank_scaling.pdf
 
   python analysis/plot_rank_scaling.py \\
-      --results_dir results --dataset orca \\
-      --metric ppl --output results/rank_scaling_ppl.pdf
+      --svd_json results/svd_spectra_orca.json \\
+      --metric er --output results/rank_scaling_er.pdf
 """
 
 import argparse
@@ -101,15 +107,31 @@ def _compute_manifold_dim(spectrum: List[float], threshold: float) -> int:
     return min(k, len(s))
 
 
-def _load_manifold(
+def _compute_er(spectrum: List[float]) -> float:
+    """
+    Effective Rank (Roy & Vetterli 2007) of a singular value spectrum:
+        ER = exp( -sum_i p_i log p_i ),  p_i = sigma_i / sum_j sigma_j
+    Matches cera.metrics.compute_effective_rank, but operates on a stored
+    spectrum instead of an activation matrix.
+    """
+    s = np.array(spectrum, dtype=np.float64)
+    total = s.sum()
+    if total < 1e-12:
+        return 0.0
+    p = s / total
+    entropy = -np.sum(p * np.log(p + 1e-10))
+    return float(np.exp(entropy))
+
+
+def _load_spectrum_metric(
     svd_json: str,
     methods: List[str],
-    threshold: float,
+    metric_fn,
 ) -> Dict[str, Dict[int, float]]:
     """
-    Read SVD spectrum JSON (from analyze_svd.py) and compute manifold
-    dimensionality per (method, rank).
-    Returns {method: {rank: manifold_dim}}.
+    Read SVD spectrum JSON (from analyze_svd.py) and apply metric_fn to each
+    spectrum, averaging over multiple runs of the same (method, rank).
+    Returns {method: {rank: value}}.
     """
     data: Dict[str, Dict[int, float]] = {m: {} for m in methods}
     with open(svd_json) as f:
@@ -126,12 +148,12 @@ def _load_manifold(
         spectrum = entry.get("spectrum")
         if not spectrum or rank == 0:
             continue
-        dim = float(_compute_manifold_dim(spectrum, threshold))
+        val = float(metric_fn(spectrum))
         if rank in data[method]:
-            data[method][rank] += dim
+            data[method][rank] += val
             counts[method][rank] += 1
         else:
-            data[method][rank] = dim
+            data[method][rank] = val
             counts[method][rank] = 1
 
     # average over multiple runs for same rank
@@ -183,8 +205,8 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     p.add_argument(
-        "--metric", choices=["ppl", "manifold", "both"], default="both",
-        help="Which metric(s) to plot.",
+        "--metric", choices=["ppl", "manifold", "er", "both"], default="both",
+        help="Which metric(s) to plot. 'both' = ppl + manifold side by side.",
     )
     p.add_argument(
         "--results_dir", default="results",
@@ -196,7 +218,7 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--svd_json", default=None,
-        help="SVD spectrum JSON from analyze_svd.py (for --metric manifold or both).",
+        help="SVD spectrum JSON from analyze_svd.py (for --metric manifold, er, or both).",
     )
     p.add_argument(
         "--threshold", type=float, default=0.90,
@@ -218,17 +240,25 @@ def main():
 
     need_ppl      = args.metric in ("ppl", "both")
     need_manifold = args.metric in ("manifold", "both")
+    need_er       = args.metric == "er"
 
-    if need_manifold:
+    if need_manifold or need_er:
         if not args.svd_json:
-            print("[ERROR] --svd_json required for manifold metric.")
+            print(f"[ERROR] --svd_json required for {args.metric} metric.")
             sys.exit(1)
         if not Path(args.svd_json).exists():
             print(f"[ERROR] SVD JSON not found: {args.svd_json}")
             sys.exit(1)
 
-    ppl_data      = _load_ppl(args.results_dir, args.dataset, args.methods) if need_ppl      else {}
-    manifold_data = _load_manifold(args.svd_json, args.methods, args.threshold) if need_manifold else {}
+    ppl_data      = _load_ppl(args.results_dir, args.dataset, args.methods) if need_ppl else {}
+    manifold_data = (
+        _load_spectrum_metric(
+            args.svd_json, args.methods,
+            lambda s: _compute_manifold_dim(s, args.threshold),
+        )
+        if need_manifold else {}
+    )
+    er_data = _load_spectrum_metric(args.svd_json, args.methods, _compute_er) if need_er else {}
 
     if need_ppl:
         total = sum(len(v) for v in ppl_data.values())
@@ -236,6 +266,9 @@ def main():
     if need_manifold:
         total = sum(len(v) for v in manifold_data.values())
         print(f"[INFO] Manifold data points loaded: {total}")
+    if need_er:
+        total = sum(len(v) for v in er_data.values())
+        print(f"[INFO] ER data points loaded: {total}")
 
     ncols = 2 if args.metric == "both" else 1
     fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 4))
@@ -254,6 +287,12 @@ def main():
             axes[-1], manifold_data, args.methods,
             ylabel=f"Manifold Dimensionality ({pct}% Variance)",
             title="Spectral Dimensionality vs Rank",
+        )
+    if need_er:
+        _plot_metric(
+            axes[0], er_data, args.methods,
+            ylabel="Effective Rank",
+            title="Effective Rank vs Rank",
         )
 
     plt.tight_layout()
