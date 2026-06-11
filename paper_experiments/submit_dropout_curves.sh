@@ -1,7 +1,7 @@
 #!/bin/bash
 # Submit the dropout robustness experiment (paper Fig. 2):
 # validation PPL curves on SlimOrca for CeRA D{0.0,0.1,0.2,0.3} + LoRA,
-# under suboptimal (1e-4) and optimal (5e-4) learning rates. Rank 128.
+# under suboptimal (1e-4) and optimal (5e-4) learning rates. Rank 512.
 #
 # Workflow:
 #   1. Train the 10 cells in slurm/configs/sweep_orca_dropout_curves.txt
@@ -39,7 +39,7 @@ echo ""
 echo "--- Submitting training (${TOTAL} cells, orca) ---"
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "[DRY] sbatch --array=1-${TOTAL}%5 --partition=8gpus slurm/run_train_array.sh ${CONFIG}"
-    echo "[DRY] sbatch --dependency=afterany:<TRAIN> slurm/run_analysis.sh curves --results_dir results --dataset orca --rank 128 --lrs 1e-4 5e-4 --output ${OUTPUT}"
+    echo "[DRY] sbatch --dependency=afterany:<TRAIN> slurm/run_analysis.sh curves --results_dir results --dataset orca --rank 512 --lrs 1e-4 5e-4 --output ${OUTPUT}"
     exit 0
 fi
 
@@ -49,14 +49,14 @@ echo "[SUBMIT] Training -> job ${TRAIN_JOB} (tasks 1-${TOTAL})"
 
 if PLOT_JOB=$(sbatch --parsable --dependency=afterany:${TRAIN_JOB} \
         slurm/run_analysis.sh curves \
-        --results_dir results --dataset orca --rank 128 \
+        --results_dir results --dataset orca --rank 512 \
         --lrs 1e-4 5e-4 --output "$OUTPUT" 2>/dev/null); then
     echo "[SUBMIT] Curves plot -> job ${PLOT_JOB}"
     echo "  Output: ${OUTPUT}"
 else
     echo "[WARN] Plot job submission failed (likely QOS limit). Run later:"
     echo "  sbatch --dependency=afterany:${TRAIN_JOB} slurm/run_analysis.sh curves \\"
-    echo "      --results_dir results --dataset orca --rank 128 \\"
+    echo "      --results_dir results --dataset orca --rank 512 \\"
     echo "      --lrs 1e-4 5e-4 --output ${OUTPUT}"
 fi
 
