@@ -100,7 +100,7 @@ handle_cell "scale_3b_r128_dora" DoRA 128 "meta-llama/Llama-3.2-3B"
 
 echo ""
 echo "--- Llama-3.1-8B (use existing checkpoints via main comparison) ---"
-echo "[NOTE] 8B results come from submit_main_comparison.sh (lr=5e-4 cells)."
+echo "[NOTE] 8B results come from submit_main_comparison.sh (best-LR cells per the run_eval.sh lookup)."
 
 echo ""
 echo "======================================================"

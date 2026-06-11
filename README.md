@@ -12,7 +12,7 @@ Because of the non-linearity, CeRA can express functions outside the column span
 
 ```bash
 git clone git@github.com:hhchen1105/cera-refactored.git
-cd cera
+cd cera-refactored
 pip install -r requirements.txt
 ```
 
@@ -92,7 +92,7 @@ python evaluate.py \
 | `--target_modules` | `q_proj,v_proj` | Comma-separated projection names |
 | `--dataset` | `math` | `math`, `code`, `orca` |
 | `--epochs` | `3` | Training epochs |
-| `--lr` | — | AdamW learning rate (use sweep-selected best: see Best LR table below, or pass `best` to `run_train.sh`) |
+| `--lr` | `5e-4` | AdamW learning rate (use sweep-selected best: see Best LR table below, or pass `best` to `run_train.sh`) |
 
 ### evaluate.py
 
@@ -116,23 +116,50 @@ python analysis/analyze_svd.py \
     --output_json results/svd_spectra.json
 ```
 
-### Effective Rank
+### Spectrum-derived figures (rank scaling, ER, manifold dim, signatures)
+
+All computed from the SVD spectrum JSON produced by `analyze_svd.py`:
 
 ```bash
-# Manifold expansion: CeRA vs LoRA
-python analysis/analyze_er.py \
-    --mode manifold --rank 64 \
-    --cera_path results/Exp_CeRA_math_R64_.../CeRA \
-    --lora_path results/Exp_LoRA_math_R64_.../LoRA \
-    | tee results/er_manifold.csv
+# PPL + manifold dimensionality vs rank (two panels)
+python analysis/plot_rank_scaling.py \
+    --metric both --results_dir results --dataset orca \
+    --svd_json results/svd_spectra_orca.json \
+    --output results/rank_scaling.pdf
 
-# Ablation ER
+# Effective Rank vs rank
+python analysis/plot_rank_scaling.py \
+    --metric er --svd_json results/svd_spectra_orca.json \
+    --output results/rank_scaling_er_orca.pdf
+
+# Singular value spectra (spectral signature)
+python analysis/plot_svd_spectra.py \
+    --svd_json results/svd_spectra_orca.json \
+    --output results/svd_signature_orca.pdf
+```
+
+### Effective Rank (per-module, ablation variants)
+
+```bash
+# Ablation ER -- per-module ER at the best checkpoint of each variant
 python analysis/analyze_er.py \
     --mode ablation --rank 128 \
     --full_path      results/.../CeRA_Full/CeRA \
     --nodropout_path results/.../CeRA_NoDrop/CeRA \
     --relu_path      results/.../CeRA_ReLU/CeRA \
     | tee results/er_ablation.csv
+```
+
+The ER *trajectory* modes of `analyze_er.py` (`manifold`, `lr_sensitivity`,
+`dropout`) are deprecated: they need legacy per-data-count checkpoints that the
+trainer no longer saves. Use `plot_rank_scaling.py --metric er` instead.
+
+### Training curves (validation PPL over training)
+
+```bash
+python analysis/plot_training_curves.py \
+    --results_dir results --dataset orca --rank 512 \
+    --lrs 1e-4 5e-4 --output results/training_curves_dropout.pdf
 ```
 
 ### Throughput Benchmark
@@ -195,19 +222,21 @@ TRAIN_JOB=$(sbatch --parsable --array=1-32%5 slurm/run_train_array.sh slurm/conf
 sbatch --array=1-32%5 --dependency=aftercorr:$TRAIN_JOB slurm/run_eval_array.sh slurm/configs/sweep_1b3b.txt
 ```
 
-Config file format (`slurm/configs/*.txt`):
+Config file format (`slurm/configs/*.txt`); the trailing DATASET column is
+optional and defaults to `math`:
 ```
-# CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL
+# CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  [DATASET]
 cera_r64_lr3e-4_1b  CeRA  64  3e-4  0.1  meta-llama/Llama-3.2-1B
+cera_orca_r64       CeRA  64  3e-4  0.1  meta-llama/Llama-3.1-8B  orca
 ```
 
 ## Citation
 
 ```bibtex
-@inproceedings{chen26cera,
+@article{chen26cera,
   title   = {CeRA: Breaking the Linear Ceiling of Low-Rank Adaptation with Inference-Time Non-linearity},
   author  = {Hung-Hsuan Chen},
   year    = {2026},
-  journal={arXiv preprint arXiv:2602.22911}
+  journal = {arXiv preprint arXiv:2602.22911}
 }
 ```

@@ -13,16 +13,19 @@ bash paper_experiments/submit_main_comparison.sh             # submit
 
 ## Experiment Map
 
+Table/figure numbers refer to the current draft (`tmp/cera.pdf`).
+
 | Script | Paper Section | Description |
 |--------|--------------|-------------|
-| `submit_main_comparison.sh` | Table 2 (LR sweep) | CeRA / LoRA / DoRA on Llama-3.1-8B, MATH + GSM8K |
-| `submit_model_scale.sh` | Table 3 (scale) | 1B / 3B / 8B model size comparison |
-| `submit_dataset_ablation.sh` | Appendix | MathInstruct vs SlimOrca |
-| `submit_ablation_study.sh` | Table 4 (ablation) | Activation fn / target modules / dropout, R=128 + R=512 |
+| `submit_main_comparison.sh` | Table 1 (main results) | CeRA / LoRA / DoRA on Llama-3.1-8B, MATH + GSM8K |
+| `analysis/compare_generations.py` | Table 2 (case study) | Qualitative CeRA-vs-LoRA generations; pass the case study prompt via `--prompt` (run manually, no submit script) |
+| `submit_ablation_study.sh` | Table 3 (ablation) | Activation fn / target modules / dropout, R=128 + R=512, SlimOrca test PPL |
+| `submit_model_scale.sh` | Not in current draft | 1B / 3B / 8B model size comparison (planned / revision material) |
+| `submit_dataset_ablation.sh` | Not in current draft | MathInstruct vs SlimOrca |
 | `submit_lora_dropout.sh` | Reviewer response | LoRA with dropout=0.1 baseline |
 | `submit_dropout_curves.sh` | Fig 2 | CeRA dropout grid {0.0-0.3} + LoRA on SlimOrca at LR 1e-4/5e-4; validation PPL curves |
 | `submit_spectral.sh` | Fig 1, 3, 4 | SlimOrca rank scaling training + SVD spectra + all spectrum-derived figure plots (PPL/manifold/ER vs rank, spectral signatures) |
-| `submit_efficiency.sh` | Table 5 (efficiency) | Throughput / latency benchmark |
+| `submit_efficiency.sh` | Sec. "Latency and Memory Complexity" | Throughput / latency benchmark (reported as in-text numbers, no numbered table) |
 
 ## Recommended Order
 
@@ -74,6 +77,10 @@ TRAIN_JOB=$(sbatch --parsable --array=1-32%5 --partition=8gpus \
 sbatch --array=1-32%5 --partition=8gpus --dependency=aftercorr:$TRAIN_JOB \
     slurm/run_eval_array.sh slurm/configs/sweep_1b3b.txt
 ```
+
+The DoRA 1B/3B sweep uses `slurm/configs/sweep_dora_1b3b.txt` (16 cells) the
+same way. For sweeps that exceed the per-user job limit, see
+`slurm/run_resubmitter.sh` and `slurm/run_experiment_array.sh`.
 
 After the sweep completes, identify the best LR per method/rank from
 `results/eval_outputs/` and update the `LR = "best"` lookup tables in
