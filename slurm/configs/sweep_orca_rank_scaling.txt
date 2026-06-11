@@ -2,17 +2,11 @@
 # Purpose: generate PPL-vs-rank and manifold-dimensionality-vs-rank data for Fig. 1.
 # LR is held fixed at 3e-4 for both methods so scaling is visible without LR confound.
 # Format: CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  DATASET
-cera_orca_r8     CeRA   8    3e-4  0.1  meta-llama/Llama-3.1-8B  orca
 cera_orca_r16    CeRA   16   3e-4  0.1  meta-llama/Llama-3.1-8B  orca
-cera_orca_r32    CeRA   32   3e-4  0.1  meta-llama/Llama-3.1-8B  orca
 cera_orca_r64    CeRA   64   3e-4  0.1  meta-llama/Llama-3.1-8B  orca
 cera_orca_r128   CeRA   128  3e-4  0.1  meta-llama/Llama-3.1-8B  orca
-cera_orca_r256   CeRA   256  3e-4  0.1  meta-llama/Llama-3.1-8B  orca
 cera_orca_r512   CeRA   512  3e-4  0.1  meta-llama/Llama-3.1-8B  orca
-lora_orca_r8     LoRA   8    3e-4  0.0  meta-llama/Llama-3.1-8B  orca
 lora_orca_r16    LoRA   16   3e-4  0.0  meta-llama/Llama-3.1-8B  orca
-lora_orca_r32    LoRA   32   3e-4  0.0  meta-llama/Llama-3.1-8B  orca
 lora_orca_r64    LoRA   64   3e-4  0.0  meta-llama/Llama-3.1-8B  orca
 lora_orca_r128   LoRA   128  3e-4  0.0  meta-llama/Llama-3.1-8B  orca
-lora_orca_r256   LoRA   256  3e-4  0.0  meta-llama/Llama-3.1-8B  orca
 lora_orca_r512   LoRA   512  3e-4  0.0  meta-llama/Llama-3.1-8B  orca

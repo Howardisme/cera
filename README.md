@@ -92,7 +92,7 @@ python evaluate.py \
 | `--target_modules` | `q_proj,v_proj` | Comma-separated projection names |
 | `--dataset` | `math` | `math`, `code`, `orca` |
 | `--epochs` | `3` | Training epochs |
-| `--lr` | — | AdamW learning rate (use sweep-selected best: CeRA R64→3e-4, CeRA R128→1e-3, LoRA/DoRA→3e-4) |
+| `--lr` | — | AdamW learning rate (use sweep-selected best: see Best LR table below, or pass `best` to `run_train.sh`) |
 
 ### evaluate.py
 
@@ -182,8 +182,8 @@ Pass `best` as the LR argument to automatically use the sweep-selected optimum f
 | CeRA   | 128  | 1e-3         | 3e-4         | 5e-4         |
 | LoRA   | 64   | 3e-4         | 3e-4         | 3e-4         |
 | LoRA   | 128  | 3e-4         | 5e-4         | 5e-4         |
-| DoRA   | 64   | 3e-4         | TBD          | TBD          |
-| DoRA   | 128  | 3e-4         | TBD          | TBD          |
+| DoRA   | 64   | 3e-4         | 5e-4         | 5e-4         |
+| DoRA   | 128  | 3e-4         | 1e-3         | 5e-4         |
 
 ### Large sweeps with job arrays
 
