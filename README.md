@@ -230,6 +230,38 @@ cera_r64_lr3e-4_1b  CeRA  64  3e-4  0.1  meta-llama/Llama-3.2-1B
 cera_orca_r64       CeRA  64  3e-4  0.1  meta-llama/Llama-3.1-8B  orca
 ```
 
+## Running without Slurm
+
+The `python` commands above (training, evaluation, analysis) run directly on
+any machine with a CUDA GPU -- Slurm is only an orchestration layer. Notes for
+non-Slurm users:
+
+- **A CUDA GPU is required for training.** `train.py` places the model on
+  `cuda` unconditionally; there is no CPU fallback.
+- **Do not run `slurm/*.sh` or `paper_experiments/*.sh` directly.** The
+  `slurm/` wrappers abort outside of `sbatch` (they depend on
+  `SLURM_SUBMIT_DIR`), and the `paper_experiments/` scripts submit jobs via
+  `sbatch`. Use the equivalent `python` commands instead.
+- **`best` LR resolution lives in the Slurm wrappers.** Pass the explicit
+  value from the Best LR table above to `train.py` / `evaluate.py`.
+
+The sweep config files under `slurm/configs/` are plain text and not tied to
+Slurm. To run a sweep sequentially without a scheduler:
+
+```bash
+grep -v '^\s*#' slurm/configs/sweep_orca_rank_scaling.txt | grep -v '^\s*$' | \
+while read -r CELL METHOD RANK LR DROPOUT BASE_MODEL DATASET; do
+    python train.py \
+        --model_type "$METHOD" --rank "$RANK" --lr "$LR" \
+        --dropout "$DROPOUT" --base_model "$BASE_MODEL" \
+        --dataset "${DATASET:-math}" --epochs 3
+done
+```
+
+To reproduce the three-part evaluation that `slurm/run_eval.sh` bundles
+(MATH pass@1, MATH pass@10, GSM8K pass@1), run the three `evaluate.py`
+commands from the Evaluation section against the same checkpoint.
+
 ## Citation
 
 ```bibtex
