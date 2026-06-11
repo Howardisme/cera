@@ -160,8 +160,8 @@ def get_singular_values(
         ckpt_path:     Path to a .pt checkpoint (produced by save_checkpoint).
         inputs:        Tokenised profiling tensor [N, seq_len].
         config:        Experiment config dict.  Required keys:
-                       'type' ('CeRA'|'LoRA'), 'rank', 'dropout', 'act_fn',
-                       'target_modules'.
+                       'type' or 'model_type' ('CeRA'|'LoRA'), 'rank',
+                       'dropout', 'act_fn', 'target_modules'.
         model_name:    HuggingFace model identifier.
         hf_token:      HuggingFace access token (for gated models).
         layer_indices: Transformer layer indices to analyse.
@@ -173,7 +173,10 @@ def get_singular_values(
     """
     from cera.adapters import apply_cera, apply_lora
 
-    model_type     = config.get("type", "CeRA")
+    # Training logs store the adapter type under 'model_type'; some callers
+    # pass 'type'. Accept both -- a wrong default here would inject the wrong
+    # adapter structure and silently produce garbage spectra.
+    model_type     = config.get("type", config.get("model_type", "CeRA"))
     rank           = config.get("rank", 64)
     dropout        = config.get("dropout", 0.0)
     act_fn         = config.get("act_fn", "silu")

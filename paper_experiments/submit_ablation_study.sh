@@ -56,7 +56,7 @@ submit_ablation_train() {
     sbatch --parsable \
         --job-name="$name" \
         --nodes=1 --gres=gpu:1 --cpus-per-task=4 \
-        --time=24:00:00 --partition=normal \
+        --time=24:00:00 --partition=8gpus \
         --output="slurm_logs/${name}_%j.log" \
         --error="slurm_logs/${name}_err_%j.log" \
         --wrap="$(cat <<EOF
