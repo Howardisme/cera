@@ -17,9 +17,10 @@
 #
 # ANALYSIS_TYPE:
 #   svd            -- SVD spectrum analysis (analyze_svd.py)
-#   er             -- Effective Rank trajectory (analyze_er.py)
+#   er             -- Effective Rank analysis (analyze_er.py; trajectory modes deprecated)
 #   benchmark      -- Throughput/latency benchmark (benchmark.py)
-#   rank_scaling   -- PPL + manifold dimensionality vs rank (plot_rank_scaling.py)
+#   rank_scaling   -- PPL / manifold dim / ER vs rank (plot_rank_scaling.py)
+#   spectra        -- Singular value spectra per rank (plot_svd_spectra.py)
 #
 # All additional arguments are forwarded to the corresponding Python script.
 #
@@ -60,8 +61,11 @@ case "$ANALYSIS_TYPE" in
     rank_scaling)
         python analysis/plot_rank_scaling.py "$@"
         ;;
+    spectra)
+        python analysis/plot_svd_spectra.py "$@"
+        ;;
     *)
-        echo "[ERROR] Unknown analysis type: ${ANALYSIS_TYPE}. Choose from svd, er, benchmark, rank_scaling."
+        echo "[ERROR] Unknown analysis type: ${ANALYSIS_TYPE}. Choose from svd, er, benchmark, rank_scaling, spectra."
         exit 1
         ;;
 esac

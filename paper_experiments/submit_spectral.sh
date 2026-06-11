@@ -9,7 +9,7 @@
 #   2. SVD spectrum analysis on those checkpoints              -- for Fig. 1 right
 #   3. plot_rank_scaling.py: PPL + manifold dim vs rank        -- Fig. 1 output
 #   4. SVD spectrum batch analysis across all math experiments -- Fig. 4
-#   5. Effective Rank vs rank plots from the spectrum JSONs    -- Fig. 3/4
+#   5. ER / manifold / spectral signature plots from the JSONs -- Fig. 3/4
 #
 # Usage:
 #   bash paper_experiments/submit_spectral.sh [--dry-run]
@@ -116,15 +116,24 @@ else
     echo "[SUBMIT] SVD (math) -> job ${SVD_MATH_JID}"
 fi
 
-# ── 5. Effective Rank vs rank plots (Fig. 3 right, Fig. 4) ───────────────────
-# ER is computed directly from the SVD spectrum JSONs; no model forward needed.
+# ── 5. Downstream figure plots from the spectrum JSONs ───────────────────────
+# All computed directly from the SVD spectrum JSONs; no model forward needed.
 # (The old analyze_er.py trajectory mode is deprecated -- it required legacy
 # per-data-count checkpoints that the trainer no longer saves.)
+#
+#   ER vs rank (orca)        -- Fig. 3 right
+#   Spectral signature orca  -- Fig. 3 left
+#   ER vs rank (math)        -- Fig. 4 ER panel
+#   Manifold vs rank (math)  -- Fig. 4 manifold panel
+#   Spectral signature math  -- Fig. 4 left
 echo ""
-echo "--- Submitting ER vs rank plots ---"
+echo "--- Submitting figure plots from spectra ---"
 if [ "$DRY_RUN" -eq 1 ]; then
     echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh rank_scaling --metric er --svd_json ${SVD_ORCA_JSON} --output results/rank_scaling_er_orca.pdf"
+    echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh spectra --svd_json ${SVD_ORCA_JSON} --output results/svd_signature_orca.pdf"
     echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh rank_scaling --metric er --svd_json results/svd_spectra.json --output results/rank_scaling_er_math.pdf"
+    echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh rank_scaling --metric manifold --svd_json results/svd_spectra.json --output results/rank_scaling_manifold_math.pdf"
+    echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh spectra --svd_json results/svd_spectra.json --output results/svd_signature_math.pdf"
 else
     ER_ORCA_JID=$(sbatch --parsable \
         --dependency=afterany:${SVD_JOB} \
@@ -132,7 +141,14 @@ else
         --metric er \
         --svd_json "$SVD_ORCA_JSON" \
         --output results/rank_scaling_er_orca.pdf)
-    echo "[SUBMIT] ER vs rank (orca) -> job ${ER_ORCA_JID}"
+    echo "[SUBMIT] ER vs rank (orca) -> job ${ER_ORCA_JID}   [Fig. 3 right]"
+
+    SIG_ORCA_JID=$(sbatch --parsable \
+        --dependency=afterany:${SVD_JOB} \
+        slurm/run_analysis.sh spectra \
+        --svd_json "$SVD_ORCA_JSON" \
+        --output results/svd_signature_orca.pdf)
+    echo "[SUBMIT] Spectral signature (orca) -> job ${SIG_ORCA_JID}   [Fig. 3 left]"
 
     ER_MATH_JID=$(sbatch --parsable \
         --dependency=afterany:${SVD_MATH_JID} \
@@ -140,13 +156,30 @@ else
         --metric er \
         --svd_json results/svd_spectra.json \
         --output results/rank_scaling_er_math.pdf)
-    echo "[SUBMIT] ER vs rank (math) -> job ${ER_MATH_JID}"
+    echo "[SUBMIT] ER vs rank (math) -> job ${ER_MATH_JID}   [Fig. 4]"
+
+    MAN_MATH_JID=$(sbatch --parsable \
+        --dependency=afterany:${SVD_MATH_JID} \
+        slurm/run_analysis.sh rank_scaling \
+        --metric manifold \
+        --svd_json results/svd_spectra.json \
+        --output results/rank_scaling_manifold_math.pdf)
+    echo "[SUBMIT] Manifold vs rank (math) -> job ${MAN_MATH_JID}   [Fig. 4]"
+
+    SIG_MATH_JID=$(sbatch --parsable \
+        --dependency=afterany:${SVD_MATH_JID} \
+        slurm/run_analysis.sh spectra \
+        --svd_json results/svd_spectra.json \
+        --output results/svd_signature_math.pdf)
+    echo "[SUBMIT] Spectral signature (math) -> job ${SIG_MATH_JID}   [Fig. 4 left]"
 fi
 
 echo ""
 echo "======================================================"
 echo " Submission complete. Monitor with: squeue -u \$USER"
-echo " Fig. 1 output: ${RANK_SCALING_OUT}"
-echo " ER plots:      results/rank_scaling_er_orca.pdf, results/rank_scaling_er_math.pdf"
-echo " SVD spectra:   ${SVD_ORCA_JSON}, results/svd_spectra.json"
+echo " Fig. 1: ${RANK_SCALING_OUT}"
+echo " Fig. 3: results/svd_signature_orca.pdf + results/rank_scaling_er_orca.pdf"
+echo " Fig. 4: results/svd_signature_math.pdf + results/rank_scaling_er_math.pdf"
+echo "         + results/rank_scaling_manifold_math.pdf"
+echo " SVD spectra: ${SVD_ORCA_JSON}, results/svd_spectra.json"
 echo "======================================================"
