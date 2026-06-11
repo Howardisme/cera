@@ -1,10 +1,11 @@
 #!/bin/bash
 # Submit spectral analysis jobs: SVD spectrum + Effective Rank trajectory.
-# Also submits the rank scaling training sweep (SlimOrca, 7 ranks) and the
-# rank_scaling plot job that produces Fig. 1 (PPL + manifold dim vs rank).
+# Also submits the rank scaling training sweep (SlimOrca; ranks taken from
+# slurm/configs/sweep_orca_rank_scaling.txt) and the rank_scaling plot job
+# that produces Fig. 1 (PPL + manifold dim vs rank).
 #
 # Workflow:
-#   1. Train CeRA and LoRA on SlimOrca across 7 ranks (R8..R512) -- for Fig. 1 left
+#   1. Train CeRA and LoRA on SlimOrca across ranks (per config) -- for Fig. 1 left
 #   2. SVD spectrum analysis on those checkpoints              -- for Fig. 1 right
 #   3. plot_rank_scaling.py: PPL + manifold dim vs rank        -- Fig. 1 output
 #   4. SVD spectrum batch analysis across all math experiments -- Fig. 2/3
@@ -27,9 +28,13 @@ mkdir -p slurm_logs results
 
 BASE_MODEL="meta-llama/Llama-3.1-8B"
 RANK_SCALING_CONFIG="slurm/configs/sweep_orca_rank_scaling.txt"
-RANK_SCALING_TOTAL=14
+RANK_SCALING_TOTAL=$(grep -v '^\s*#' "$RANK_SCALING_CONFIG" | grep -cv '^\s*$')
 SVD_ORCA_JSON="results/svd_spectra_orca.json"
 RANK_SCALING_OUT="results/rank_scaling.pdf"
+# Max array tasks submitted at once (QOS limit is 10 jobs/user; leave headroom
+# for the SVD/plot/ER jobs below). If the config grows beyond this, the SVD
+# job can no longer be chained correctly at submit time -- see check below.
+BATCH_LIMIT=8
 
 # -- Edit these paths to your best math checkpoints -----------------------
 CERA_R64_PATH="results/Exp_CeRA_math_R64_lr0.0003_silu_q_proj_v_proj_D0.1_E3_*/CeRA"
@@ -41,25 +46,29 @@ echo " Spectral Analysis + Rank Scaling (Fig. 1)"
 echo " $(date)"
 echo "======================================================"
 
-# ── 1. Rank scaling training: SlimOrca x 7 ranks x 2 methods ─────────────────
+# ── 1. Rank scaling training: SlimOrca, CeRA + LoRA across ranks ─────────────
 echo ""
-echo "--- Submitting rank scaling training (14 cells, orca) ---"
-BATCH1_END=8
+echo "--- Submitting rank scaling training (${RANK_SCALING_TOTAL} cells, orca) ---"
+
+# The downstream SVD job is chained on the training array via afterany, which
+# only works if ALL cells fit in a single array submission. With a cascading
+# resubmitter the final batch's job ID is unknown at submit time, so the SVD
+# would start after batch 1 only. Refuse to submit silently-wrong chains.
+if [ "$RANK_SCALING_TOTAL" -gt "$BATCH_LIMIT" ]; then
+    echo "[ERROR] ${RANK_SCALING_CONFIG} has ${RANK_SCALING_TOTAL} cells (> BATCH_LIMIT=${BATCH_LIMIT})."
+    echo "        The SVD/plot chain cannot be wired correctly across resubmitter batches."
+    echo "        Split the config, or submit training via run_resubmitter.sh manually and"
+    echo "        run the SVD/plot steps after all training finishes."
+    exit 1
+fi
+
 if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY] sbatch --array=1-${BATCH1_END}%5 --partition=8gpus slurm/run_train_array.sh ${RANK_SCALING_CONFIG}"
-    echo "[DRY] sbatch --dependency=afterany:<BATCH1> slurm/run_resubmitter.sh ... (tasks 9-14)"
+    echo "[DRY] sbatch --array=1-${RANK_SCALING_TOTAL}%5 --partition=8gpus slurm/run_train_array.sh ${RANK_SCALING_CONFIG}"
     TRAIN_JOB="DRY_TRAIN"
 else
-    BATCH1=$(sbatch --parsable --array=1-${BATCH1_END}%5 --partition=8gpus \
+    TRAIN_JOB=$(sbatch --parsable --array=1-${RANK_SCALING_TOTAL}%5 --partition=8gpus \
         slurm/run_train_array.sh "$RANK_SCALING_CONFIG")
-    echo "[SUBMIT] Rank scaling batch 1 -> job ${BATCH1} (tasks 1-8)"
-
-    RESUB=$(sbatch --parsable --partition=8gpus \
-        --dependency=afterany:${BATCH1} \
-        slurm/run_resubmitter.sh "$RANK_SCALING_CONFIG" 9 "$RANK_SCALING_TOTAL" \
-        "$RANK_SCALING_TOTAL" 8 8gpus)
-    echo "[SUBMIT] Resubmitter -> job ${RESUB} (tasks 9-14)"
-    TRAIN_JOB="$BATCH1"
+    echo "[SUBMIT] Rank scaling training -> job ${TRAIN_JOB} (tasks 1-${RANK_SCALING_TOTAL})"
 fi
 
 # ── 2. SVD spectrum on orca rank scaling checkpoints ─────────────────────────
