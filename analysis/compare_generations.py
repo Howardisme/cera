@@ -48,6 +48,12 @@ def parse_args() -> argparse.Namespace:
                    help="LoRA rank.")
     p.add_argument("--num_samples", type=int, default=100,
                    help="Number of test examples to generate.")
+    p.add_argument("--prompt", action="append", default=None,
+                   help="Custom prompt, used verbatim (repeatable). When given, "
+                        "the MathInstruct test slice is skipped. Use this to "
+                        "reproduce a specific case study example.")
+    p.add_argument("--max_new_tokens", type=int, default=256,
+                   help="Generation length.")
     p.add_argument("--output", default="results/case_study_candidates.txt",
                    help="Output file path.")
     return p.parse_args()
@@ -89,12 +95,12 @@ def load_model_with_adapter(ckpt_path: str, model_type: str, rank: int,
     return model
 
 
-def generate_answers(model, tokenizer, prompts):
+def generate_answers(model, tokenizer, prompts, max_new_tokens=256):
     outputs = []
     with torch.no_grad():
         for p in tqdm(prompts):
             inputs = tokenizer(p, return_tensors="pt").to(DEVICE)
-            out    = model.generate(**inputs, max_new_tokens=256, do_sample=False)
+            out    = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
             outputs.append(tokenizer.decode(out[0], skip_special_tokens=True))
     return outputs
 
@@ -112,18 +118,25 @@ def main():
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, token=hf_token)
     tokenizer.pad_token = tokenizer.eos_token
 
-    print("[INFO] Loading MathInstruct test slice...")
-    ds        = load_dataset("TIGER-Lab/MathInstruct", split="train")
-    test_data = ds.select(range(100_000, 100_000 + args.num_samples))
-    prompts   = [f"Question: {x['instruction']}\nAnswer:" for x in test_data]
-    golds     = [x["output"] for x in test_data]
+    if args.prompt:
+        print(f"[INFO] Using {len(args.prompt)} custom prompt(s).")
+        prompts   = list(args.prompt)
+        questions = list(args.prompt)
+        golds     = ["(custom prompt -- no gold answer)"] * len(prompts)
+    else:
+        print("[INFO] Loading MathInstruct test slice...")
+        ds        = load_dataset("TIGER-Lab/MathInstruct", split="train")
+        test_data = ds.select(range(100_000, 100_000 + args.num_samples))
+        prompts   = [f"Question: {x['instruction']}\nAnswer:" for x in test_data]
+        questions = [x["instruction"] for x in test_data]
+        golds     = [x["output"] for x in test_data]
 
     # CeRA generation
     if os.path.exists(args.cera_ckpt):
         model_cera   = load_model_with_adapter(
             args.cera_ckpt, "CeRA", args.cera_rank, args.base_model, hf_token
         )
-        cera_outputs = generate_answers(model_cera, tokenizer, prompts)
+        cera_outputs = generate_answers(model_cera, tokenizer, prompts, args.max_new_tokens)
         del model_cera
         torch.cuda.empty_cache()
     else:
@@ -134,7 +147,7 @@ def main():
         model_lora   = load_model_with_adapter(
             args.lora_ckpt, "LoRA", args.lora_rank, args.base_model, hf_token
         )
-        lora_outputs = generate_answers(model_lora, tokenizer, prompts)
+        lora_outputs = generate_answers(model_lora, tokenizer, prompts, args.max_new_tokens)
         del model_lora
         torch.cuda.empty_cache()
     else:
@@ -149,7 +162,7 @@ def main():
 
             f.write("=" * 80 + "\n")
             f.write(f"Case ID: {i}\n")
-            f.write(f"[Question]:\n{test_data[i]['instruction']}\n\n")
+            f.write(f"[Question]:\n{questions[i]}\n\n")
             f.write(f"[Gold Answer]:\n{golds[i]}\n\n")
             f.write("-" * 40 + "\n")
             f.write(f"[CeRA (R{args.cera_rank})]:\n{cera_ans}\n\n")

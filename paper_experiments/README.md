@@ -20,6 +20,7 @@ bash paper_experiments/submit_main_comparison.sh             # submit
 | `submit_dataset_ablation.sh` | Appendix | MathInstruct vs SlimOrca |
 | `submit_ablation_study.sh` | Table 4 (ablation) | Activation fn / target modules / dropout, R=128 + R=512 |
 | `submit_lora_dropout.sh` | Reviewer response | LoRA with dropout=0.1 baseline |
+| `submit_dropout_curves.sh` | Fig 2 | CeRA dropout grid {0.0-0.3} + LoRA on SlimOrca at LR 1e-4/5e-4; validation PPL curves |
 | `submit_spectral.sh` | Fig 1, 3, 4 | SlimOrca rank scaling training + SVD spectra + all spectrum-derived figure plots (PPL/manifold/ER vs rank, spectral signatures) |
 | `submit_efficiency.sh` | Table 5 (efficiency) | Throughput / latency benchmark |
 
@@ -31,9 +32,10 @@ bash paper_experiments/submit_main_comparison.sh             # submit
 4. `submit_spectral.sh` -- trains its own SlimOrca rank scaling sweep (Fig. 1/3
    are self-contained); the math SVD / Fig. 4 plots additionally require the
    math checkpoints from step 1
-5. `submit_efficiency.sh` -- latency benchmark (no checkpoint required)
-6. `submit_lora_dropout.sh` -- reviewer response ablation (submit if requested)
-7. `submit_dataset_ablation.sh` -- dataset comparison (submit if needed)
+5. `submit_dropout_curves.sh` -- Fig. 2 dropout robustness curves (self-contained)
+6. `submit_efficiency.sh` -- latency benchmark (no checkpoint required)
+7. `submit_lora_dropout.sh` -- reviewer response ablation (submit if requested)
+8. `submit_dataset_ablation.sh` -- dataset comparison (submit if needed)
 
 ## Output Locations
 
@@ -43,6 +45,7 @@ bash paper_experiments/submit_main_comparison.sh             # submit
 | Eval (main, scale) | `results/eval_outputs/<cell_id>/` |
 | SVD spectra | `results/svd_spectra.json` (math), `results/svd_spectra_orca.json` |
 | Fig. 1 | `results/rank_scaling.pdf` |
+| Fig. 2 | `results/training_curves_dropout.pdf` |
 | Fig. 3 | `results/svd_signature_orca.pdf`, `results/rank_scaling_er_orca.pdf` |
 | Fig. 4 | `results/svd_signature_math.pdf`, `results/rank_scaling_er_math.pdf`, `results/rank_scaling_manifold_math.pdf` |
 | ER ablation (analyze_er.py, ablation mode) | stdout (redirect with `| tee results/er_*.csv`) |

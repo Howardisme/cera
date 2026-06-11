@@ -21,6 +21,7 @@
 #   benchmark      -- Throughput/latency benchmark (benchmark.py)
 #   rank_scaling   -- PPL / manifold dim / ER vs rank (plot_rank_scaling.py)
 #   spectra        -- Singular value spectra per rank (plot_svd_spectra.py)
+#   curves         -- Validation PPL curves during training (plot_training_curves.py)
 #
 # All additional arguments are forwarded to the corresponding Python script.
 #
@@ -64,8 +65,11 @@ case "$ANALYSIS_TYPE" in
     spectra)
         python analysis/plot_svd_spectra.py "$@"
         ;;
+    curves)
+        python analysis/plot_training_curves.py "$@"
+        ;;
     *)
-        echo "[ERROR] Unknown analysis type: ${ANALYSIS_TYPE}. Choose from svd, er, benchmark, rank_scaling, spectra."
+        echo "[ERROR] Unknown analysis type: ${ANALYSIS_TYPE}. Choose from svd, er, benchmark, rank_scaling, spectra, curves."
         exit 1
         ;;
 esac

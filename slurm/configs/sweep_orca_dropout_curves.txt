@@ -1,0 +1,16 @@
+# Fig. 2: validation PPL curves on SlimOrca under suboptimal (1e-4) and
+# optimal (5e-4) learning rates. CeRA dropout grid {0.0, 0.1, 0.2, 0.3}
+# plus the standard LoRA baseline.
+# NOTE: rank 128 is an assumption -- the draft does not state the rank used
+# for Fig. 2. Verify against the original experiment before final submission.
+# Format: CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  DATASET
+cera_d00_lr1e-4  CeRA  128  1e-4  0.0  meta-llama/Llama-3.1-8B  orca
+cera_d01_lr1e-4  CeRA  128  1e-4  0.1  meta-llama/Llama-3.1-8B  orca
+cera_d02_lr1e-4  CeRA  128  1e-4  0.2  meta-llama/Llama-3.1-8B  orca
+cera_d03_lr1e-4  CeRA  128  1e-4  0.3  meta-llama/Llama-3.1-8B  orca
+lora_lr1e-4      LoRA  128  1e-4  0.0  meta-llama/Llama-3.1-8B  orca
+cera_d00_lr5e-4  CeRA  128  5e-4  0.0  meta-llama/Llama-3.1-8B  orca
+cera_d01_lr5e-4  CeRA  128  5e-4  0.1  meta-llama/Llama-3.1-8B  orca
+cera_d02_lr5e-4  CeRA  128  5e-4  0.2  meta-llama/Llama-3.1-8B  orca
+cera_d03_lr5e-4  CeRA  128  5e-4  0.3  meta-llama/Llama-3.1-8B  orca
+lora_lr5e-4      LoRA  128  5e-4  0.0  meta-llama/Llama-3.1-8B  orca
