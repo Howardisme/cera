@@ -197,9 +197,7 @@ def _plot_metric(
     ax.set_ylabel(ylabel, fontsize=12)
     if title:
         ax.set_title(title, fontsize=12)
-    # Log spacing, but label ticks with the literal rank values (16, 64, ...)
-    # instead of base-2 exponents.
-    ax.set_xscale("log", base=2)
+    # Linear x with ticks only at the literal rank values (16, 64, ...).
     all_ranks = sorted({r for m in methods for r in data.get(m, {})})
     if all_ranks:
         ax.set_xticks(all_ranks)
