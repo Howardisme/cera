@@ -1,0 +1,9 @@
+# Math rank scaling extension: add R16 and R512 cells so the Fig. 4 spectral
+# figures cover the same rank set {16, 64, 128, 512} as Fig. 1/3.
+# LR fixed at 3e-4 for both methods (same convention as the orca rank scaling
+# sweep) to avoid an LR confound across ranks.
+# CELL_ID  METHOD  RANK  LR  DROPOUT  BASE_MODEL  [DATASET]
+cera_math_r16    CeRA   16   3e-4  0.1  meta-llama/Llama-3.1-8B  math
+cera_math_r512   CeRA   512  3e-4  0.1  meta-llama/Llama-3.1-8B  math
+lora_math_r16    LoRA   16   3e-4  0.0  meta-llama/Llama-3.1-8B  math
+lora_math_r512   LoRA   512  3e-4  0.0  meta-llama/Llama-3.1-8B  math

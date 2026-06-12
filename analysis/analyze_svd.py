@@ -131,6 +131,15 @@ def process_folder(
         print(f"[ERROR] {folder_path.name}: cannot read log: {exc}")
         return None
 
+    # Checkpoints trained on a different base model must be skipped: their
+    # adapter keys do not match the injected structure, load_state_dict
+    # (strict=False) silently loads nothing, and the resulting spectrum is
+    # that of a randomly initialized adapter.
+    trained_on = config.get("model", "")
+    if trained_on and trained_on != base_model:
+        print(f"[SKIP] {folder_path.name}: trained on {trained_on}, not {base_model}.")
+        return None
+
     ckpt = find_best_checkpoint(sub_dir, m_type)
     if ckpt is None:
         print(f"[SKIP] {folder_path.name}: no checkpoint files found.")
