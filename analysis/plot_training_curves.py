@@ -150,6 +150,9 @@ def main():
             any_data = True
 
         ax.set_xlabel("Training Samples Seen", fontsize=12)
+        # Log x: eval points are denser early in training. The data_seen=0
+        # baseline point cannot appear on a log axis and is clipped.
+        ax.set_xscale("log")
         ax.set_title(f"LR = {lr}", fontsize=12)
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
