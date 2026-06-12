@@ -195,7 +195,8 @@ def _plot_metric(
         )
     ax.set_xlabel("Rank", fontsize=12)
     ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_title(title, fontsize=12)
+    if title:
+        ax.set_title(title, fontsize=12)
     # Log spacing, but label ticks with the literal rank values (16, 64, ...)
     # instead of base-2 exponents.
     ax.set_xscale("log", base=2)
@@ -303,7 +304,7 @@ def main():
         _plot_metric(
             axes[0], er_data, args.methods,
             ylabel="Effective Rank",
-            title="Effective Rank vs Rank",
+            title="",
         )
 
     plt.tight_layout()

@@ -94,6 +94,14 @@ def parse_args() -> argparse.Namespace:
         help="Ranks to include (default: all found in the JSON).",
     )
     p.add_argument(
+        "--xmax", type=int, default=None,
+        help="Truncate the x axis at this singular value index.",
+    )
+    p.add_argument(
+        "--rank_limit", type=int, default=None,
+        help="Annotate this x position with an arrow labeled 'Rank Limit (N)'.",
+    )
+    p.add_argument(
         "--output", default="results/svd_signature.pdf",
         help="Output figure path (.pdf, .png, .svg).",
     )
@@ -131,9 +139,27 @@ def main():
     ax.set_xlabel("Singular Value Index", fontsize=12)
     ax.set_ylabel("Singular Value (log scale)", fontsize=12)
     ax.set_yscale("log")
-    ax.set_title("Spectral Signature", fontsize=12)
     ax.legend(fontsize=9, ncol=2)
     ax.grid(True, alpha=0.3)
+
+    if args.xmax:
+        ax.set_xlim(0, args.xmax)
+    if args.rank_limit:
+        ax.axvline(args.rank_limit, color="black", linestyle="--", linewidth=2.2)
+        # Arrow at the rank-limit cliff; positions in log-y space.
+        ymin, ymax = ax.get_ylim()
+        log_mid = 0.5 * (np.log10(ymin) + np.log10(ymax))
+        y_arrow = 10 ** log_mid
+        y_text = 10 ** (log_mid + 0.35 * (np.log10(ymax) - log_mid))
+        ax.annotate(
+            f"Rank Limit ({args.rank_limit})",
+            xy=(args.rank_limit, y_arrow),
+            xytext=(args.rank_limit * 0.55, y_text),
+            fontsize=10,
+            fontweight="bold",
+            ha="center",
+            arrowprops=dict(arrowstyle="->", color="black", linewidth=1.2),
+        )
 
     plt.tight_layout()
     out = Path(args.output)

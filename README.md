@@ -132,9 +132,11 @@ python analysis/plot_rank_scaling.py \
     --metric er --svd_json results/svd_spectra_orca.json \
     --output results/rank_scaling_er_orca.pdf
 
-# Singular value spectra (spectral signature)
+# Singular value spectra (spectral signature; Fig. 3 shows rank 512 only,
+# truncated at index 600 with the rank limit annotated)
 python analysis/plot_svd_spectra.py \
-    --svd_json results/svd_spectra_orca.json \
+    --svd_json results/svd_spectra_orca.json --ranks 512 \
+    --xmax 600 --rank_limit 512 \
     --output results/svd_signature_orca.pdf
 ```
 
