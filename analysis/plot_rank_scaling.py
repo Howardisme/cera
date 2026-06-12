@@ -66,6 +66,10 @@ def _load_ppl(
     for exp_dir in sorted(results_path.iterdir()):
         if not exp_dir.is_dir():
             continue
+        # startswith mirrors scan_experiment_dirs: quarantined runs renamed
+        # with a prefix (e.g. ABORTED_Exp_...) must not be picked up.
+        if not exp_dir.name.startswith("Exp_"):
+            continue
         if f"_{dataset}_" not in exp_dir.name:
             continue
 

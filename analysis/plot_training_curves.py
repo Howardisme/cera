@@ -63,6 +63,10 @@ def _load_runs(
         if not exp_dir.is_dir():
             continue
         name = exp_dir.name
+        # startswith mirrors scan_experiment_dirs: quarantined runs renamed
+        # with a prefix (e.g. ABORTED_Exp_...) must not be picked up.
+        if not name.startswith("Exp_"):
+            continue
         if f"_{dataset}_" not in name or f"_R{rank}_lr{lr_dec}_" not in name:
             continue
 
