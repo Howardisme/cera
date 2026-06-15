@@ -47,7 +47,7 @@ Table/figure numbers refer to the current draft (`tmp/cera.pdf`).
 | All training | `results/Exp_<METHOD>_<dataset>_R<rank>_.../<METHOD>/` |
 | Eval (main, scale) | `results/eval_outputs/<cell_id>/` |
 | SVD spectra | `results/svd_spectra.json` (math), `results/svd_spectra_orca.json` |
-| Fig. 1 | `results/rank_scaling.pdf` |
+| Fig. 1 | `results/rank_scaling_ppl_orca.pdf`, `results/rank_scaling_manifold_orca.pdf` |
 | Fig. 2 | `results/training_curves_dropout.pdf` |
 | Fig. 3 | `results/svd_signature_orca.pdf`, `results/rank_scaling_er_orca.pdf` |
 | Fig. 4 | `results/svd_signature_math.pdf`, `results/rank_scaling_er_math.pdf`, `results/rank_scaling_manifold_math.pdf` |

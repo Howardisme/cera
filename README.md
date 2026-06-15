@@ -121,11 +121,16 @@ python analysis/analyze_svd.py \
 All computed from the SVD spectrum JSON produced by `analyze_svd.py`:
 
 ```bash
-# PPL + manifold dimensionality vs rank (two panels)
+# PPL vs rank (Fig. 1 left)
 python analysis/plot_rank_scaling.py \
-    --metric both --results_dir results --dataset orca \
+    --metric ppl --results_dir results --dataset orca \
+    --output results/rank_scaling_ppl_orca.pdf
+
+# Manifold dimensionality vs rank (Fig. 1 right)
+python analysis/plot_rank_scaling.py \
+    --metric manifold --dataset orca \
     --svd_json results/svd_spectra_orca.json \
-    --output results/rank_scaling.pdf
+    --output results/rank_scaling_manifold_orca.pdf
 
 # Effective Rank vs rank
 python analysis/plot_rank_scaling.py \

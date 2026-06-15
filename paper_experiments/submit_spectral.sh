@@ -30,7 +30,8 @@ BASE_MODEL="meta-llama/Llama-3.1-8B"
 RANK_SCALING_CONFIG="slurm/configs/sweep_orca_rank_scaling.txt"
 RANK_SCALING_TOTAL=$(grep -v '^\s*#' "$RANK_SCALING_CONFIG" | grep -cv '^\s*$')
 SVD_ORCA_JSON="results/svd_spectra_orca.json"
-RANK_SCALING_OUT="results/rank_scaling.pdf"
+RANK_SCALING_PPL_OUT="results/rank_scaling_ppl_orca.pdf"
+RANK_SCALING_MAN_OUT="results/rank_scaling_manifold_orca.pdf"
 # Max array tasks submitted at once (QOS limit is 10 jobs/user; leave headroom
 # for the SVD/plot/ER jobs below). If the config grows beyond this, the SVD
 # job can no longer be chained correctly at submit time -- see check below.
@@ -87,18 +88,28 @@ fi
 echo ""
 echo "--- Submitting rank scaling plot (Fig. 1) ---"
 if [ "$DRY_RUN" -eq 1 ]; then
-    echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh rank_scaling --metric both --results_dir results --dataset orca --svd_json ${SVD_ORCA_JSON} --output ${RANK_SCALING_OUT}"
+    echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh rank_scaling --metric ppl --results_dir results --dataset orca --output ${RANK_SCALING_PPL_OUT}"
+    echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh rank_scaling --metric manifold --dataset orca --svd_json ${SVD_ORCA_JSON} --output ${RANK_SCALING_MAN_OUT}"
 else
-    PLOT_JOB=$(sbatch --parsable \
+    PLOT_PPL_JOB=$(sbatch --parsable \
         --dependency=afterany:${SVD_JOB} \
         slurm/run_analysis.sh rank_scaling \
-        --metric both \
+        --metric ppl \
         --results_dir results \
         --dataset orca \
+        --output "$RANK_SCALING_PPL_OUT")
+    echo "[SUBMIT] Rank scaling PPL plot -> job ${PLOT_PPL_JOB}"
+    echo "  Output: ${RANK_SCALING_PPL_OUT}"
+
+    PLOT_MAN_JOB=$(sbatch --parsable \
+        --dependency=afterany:${SVD_JOB} \
+        slurm/run_analysis.sh rank_scaling \
+        --metric manifold \
+        --dataset orca \
         --svd_json "$SVD_ORCA_JSON" \
-        --output "$RANK_SCALING_OUT")
-    echo "[SUBMIT] Rank scaling plot -> job ${PLOT_JOB}"
-    echo "  Output: ${RANK_SCALING_OUT}"
+        --output "$RANK_SCALING_MAN_OUT")
+    echo "[SUBMIT] Rank scaling manifold plot -> job ${PLOT_MAN_JOB}"
+    echo "  Output: ${RANK_SCALING_MAN_OUT}"
 fi
 
 # ── 4. SVD spectrum batch analysis (math experiments) ────────────────────────
@@ -179,7 +190,7 @@ fi
 echo ""
 echo "======================================================"
 echo " Submission complete. Monitor with: squeue -u \$USER"
-echo " Fig. 1: ${RANK_SCALING_OUT}"
+echo " Fig. 1: ${RANK_SCALING_PPL_OUT} + ${RANK_SCALING_MAN_OUT}"
 echo " Fig. 3: results/svd_signature_orca.pdf + results/rank_scaling_er_orca.pdf"
 echo " Fig. 4: results/svd_signature_math.pdf + results/rank_scaling_er_math.pdf"
 echo "         + results/rank_scaling_manifold_math.pdf"

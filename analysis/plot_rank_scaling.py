@@ -21,9 +21,13 @@ across ranks are unaffected.
 Usage
 -----
   python analysis/plot_rank_scaling.py \\
-      --results_dir results --dataset orca \\
+      --metric ppl --results_dir results --dataset orca \\
+      --output results/rank_scaling_ppl_orca.pdf
+
+  python analysis/plot_rank_scaling.py \\
+      --metric manifold --dataset orca \\
       --svd_json results/svd_spectra_orca.json \\
-      --metric both --output results/rank_scaling.pdf
+      --output results/rank_scaling_manifold_orca.pdf
 
   python analysis/plot_rank_scaling.py \\
       --svd_json results/svd_spectra_orca.json \\
@@ -289,14 +293,14 @@ def main():
         _plot_metric(
             axes[0], ppl_data, args.methods,
             ylabel="Perplexity",
-            title=f"Capacity Scaling ({args.dataset})",
+            title="",
         )
     if need_manifold:
         pct = int(args.threshold * 100)
         _plot_metric(
             axes[-1], manifold_data, args.methods,
             ylabel=f"Manifold Dimensionality ({pct}% Variance)",
-            title="Spectral Dimensionality vs Rank",
+            title="",
         )
     if need_er:
         _plot_metric(
