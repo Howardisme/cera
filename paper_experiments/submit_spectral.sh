@@ -133,7 +133,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
     echo "[DRY] sbatch --dependency=afterany:<SVD> slurm/run_analysis.sh spectra --svd_json ${SVD_ORCA_JSON} --ranks 512 --xmax 600 --rank_limit 512 --output results/svd_signature_orca.pdf"
     echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh rank_scaling --metric er --svd_json results/svd_spectra.json --output results/rank_scaling_er_math.pdf"
     echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh rank_scaling --metric manifold --svd_json results/svd_spectra.json --output results/rank_scaling_manifold_math.pdf"
-    echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh spectra --svd_json results/svd_spectra.json --output results/svd_signature_math.pdf"
+    echo "[DRY] sbatch --dependency=afterany:<SVD_MATH> slurm/run_analysis.sh spectra --svd_json results/svd_spectra.json --ranks 512 --xmax 600 --rank_limit 512 --output results/svd_signature_math.pdf"
 else
     ER_ORCA_JID=$(sbatch --parsable \
         --dependency=afterany:${SVD_JOB} \
@@ -171,6 +171,7 @@ else
         --dependency=afterany:${SVD_MATH_JID} \
         slurm/run_analysis.sh spectra \
         --svd_json results/svd_spectra.json \
+        --ranks 512 --xmax 600 --rank_limit 512 \
         --output results/svd_signature_math.pdf)
     echo "[SUBMIT] Spectral signature (math) -> job ${SIG_MATH_JID}   [Fig. 4 left]"
 fi
