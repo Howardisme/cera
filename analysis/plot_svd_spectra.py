@@ -136,10 +136,11 @@ def main():
             label=f"{method} R{rank}",
         )
 
-    ax.set_xlabel("Singular Value Index", fontsize=12)
-    ax.set_ylabel("Singular Value (log scale)", fontsize=12)
+    ax.set_xlabel("Singular Value Index", fontsize=18)
+    ax.set_ylabel("Singular Value (log scale)", fontsize=18)
     ax.set_yscale("log")
-    ax.legend(fontsize=9, ncol=2)
+    ax.tick_params(axis="both", which="major", labelsize=15)
+    ax.legend(fontsize=14, ncol=2)
     ax.grid(True, alpha=0.3)
 
     if args.xmax:
@@ -155,7 +156,7 @@ def main():
             f"Rank Limit ({args.rank_limit})",
             xy=(args.rank_limit, y_arrow),
             xytext=(args.rank_limit * 0.55, y_text),
-            fontsize=10,
+            fontsize=13,
             fontweight="bold",
             ha="center",
             arrowprops=dict(arrowstyle="->", color="black", linewidth=1.2),

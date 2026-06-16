@@ -149,15 +149,16 @@ def main():
                     linewidth=1.8, marker="o", markersize=3, label=label)
             any_data = True
 
-        ax.set_xlabel("Training Samples Seen", fontsize=12)
+        ax.set_xlabel("Training Samples Seen", fontsize=14)
         # Log x: eval points are denser early in training. The data_seen=0
         # baseline point cannot appear on a log axis and is clipped.
         ax.set_xscale("log")
-        ax.set_title(f"LR = {lr}", fontsize=12)
-        ax.legend(fontsize=9)
+        ax.set_title(f"LR = {lr}", fontsize=14)
+        ax.tick_params(axis="both", which="major", labelsize=12)
+        ax.legend(fontsize=11)
         ax.grid(True, alpha=0.3)
 
-    axes[0].set_ylabel("Validation Perplexity", fontsize=12)
+    axes[0].set_ylabel("Validation Perplexity", fontsize=14)
 
     if not any_data:
         print("[ERROR] No matching runs found -- nothing to plot.")

@@ -197,17 +197,18 @@ def _plot_metric(
             linewidth=2,
             markersize=6,
         )
-    ax.set_xlabel("Rank", fontsize=12)
-    ax.set_ylabel(ylabel, fontsize=12)
+    ax.set_xlabel("Rank", fontsize=18)
+    ax.set_ylabel(ylabel, fontsize=18)
     if title:
-        ax.set_title(title, fontsize=12)
+        ax.set_title(title, fontsize=18)
     # Linear x with ticks only at the literal rank values (16, 64, ...).
     all_ranks = sorted({r for m in methods for r in data.get(m, {})})
     if all_ranks:
         ax.set_xticks(all_ranks)
         ax.set_xticklabels([str(r) for r in all_ranks])
         ax.minorticks_off()
-    ax.legend(fontsize=11)
+    ax.tick_params(axis="both", which="major", labelsize=15)
+    ax.legend(fontsize=16)
     ax.grid(True, alpha=0.3)
 
 
@@ -285,7 +286,7 @@ def main():
         print(f"[INFO] ER data points loaded: {total}")
 
     ncols = 2 if args.metric == "both" else 1
-    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 4))
+    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 4), constrained_layout=True)
     if ncols == 1:
         axes = [axes]
 
@@ -299,7 +300,7 @@ def main():
         pct = int(args.threshold * 100)
         _plot_metric(
             axes[-1], manifold_data, args.methods,
-            ylabel=f"Manifold Dimensionality ({pct}% Variance)",
+            ylabel=f"Manifold Dimensionality\n({pct}% Variance)",
             title="",
         )
     if need_er:
@@ -309,10 +310,9 @@ def main():
             title="",
         )
 
-    plt.tight_layout()
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
-    plt.savefig(out, dpi=150, bbox_inches="tight")
+    plt.savefig(out, dpi=150)
     print(f"[SUCCESS] Figure saved -> {out}")
 
 
