@@ -13,7 +13,7 @@ bash paper_experiments/submit_main_comparison.sh             # submit
 
 ## Experiment Map
 
-Table/figure numbers refer to the current draft (`tmp/cera.pdf`).
+Table/figure numbers refer to the current draft (`tmp/colm26_cera-0616.pdf`).
 
 | Script | Paper Section | Description |
 |--------|--------------|-------------|
