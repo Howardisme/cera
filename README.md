@@ -226,46 +226,6 @@ R512 best LRs are from the 1B/3B `math` sweep; R512 on Llama-3.1-8B (`math`)
 was not swept (`--`). Full per-LR R512 numbers are in the "R512 LR Sweep
 Results" section below.
 
-### R512 LR Sweep Results
-
-MathInstruct fine-tuning, evaluated on MATH-500 (pass@1 greedy; pass@10 unbiased
-estimator, 10 samples, T=0.8, top_p=0.95) and GSM8K (pass@1 greedy, 1319
-problems). Best LR per method (by MATH pass@1) marked with `*`.
-
-Llama-3.2-1B, R512:
-
-| Method | LR     | MATH@1 | MATH@10 | GSM8K@1 |
-|--------|--------|--------|---------|---------|
-| CeRA   | 1e-4   | 3.2    | 20.2    | 18.04   |
-| CeRA   | 3e-4 * | 4.6    | 22.0    | 18.65   |
-| CeRA   | 5e-4   | 3.4    | 23.8    | 20.55   |
-| CeRA   | 1e-3   | 4.0    | 20.6    | 17.06   |
-| LoRA   | 1e-4   | 1.8    | 10.8    | 13.87   |
-| LoRA   | 3e-4   | 2.6    | 17.8    | 16.76   |
-| LoRA   | 5e-4 * | 3.0    | 21.2    | 17.89   |
-| LoRA   | 1e-3   | 3.0    | 17.2    | 17.21   |
-| DoRA   | 1e-4   | 1.4    | 10.0    | 13.04   |
-| DoRA   | 3e-4   | 1.8    | 13.4    | 18.12   |
-| DoRA   | 5e-4 * | 2.2    | 16.6    | 17.44   |
-| DoRA   | 1e-3   | 2.0    | 19.4    | 18.20   |
-
-Llama-3.2-3B, R512:
-
-| Method | LR     | MATH@1 | MATH@10 | GSM8K@1 |
-|--------|--------|--------|---------|---------|
-| CeRA   | 1e-4   | 10.2   | 36.0    | 35.71   |
-| CeRA   | 3e-4   | 7.8    | 35.8    | 41.09   |
-| CeRA   | 5e-4 * | 11.2   | 34.2    | 34.87   |
-| CeRA   | 1e-3   | 10.4   | 35.2    | 36.24   |
-| LoRA   | 1e-4   | 6.0    | 30.8    | 34.50   |
-| LoRA   | 3e-4   | 8.2    | 32.8    | 39.95   |
-| LoRA   | 5e-4 * | 10.0   | 37.0    | 36.16   |
-| LoRA   | 1e-3   | 6.6    | 31.6    | 31.01   |
-| DoRA   | 1e-4   | 5.4    | 28.6    | 36.39   |
-| DoRA   | 3e-4   | 8.8    | 33.4    | 37.38   |
-| DoRA   | 5e-4 * | 11.2   | 34.2    | 35.41   |
-| DoRA   | 1e-3   | 8.0    | 31.8    | 36.69   |
-
 ### Large sweeps with job arrays
 
 For multi-cell sweeps (e.g. LR sweep across model sizes), use the array scripts so all tasks are submitted as two jobs and SLURM auto-fills slots as they open:
