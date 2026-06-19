@@ -40,6 +40,7 @@ MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
 # 8B: CeRA R64→3e-4, CeRA R128→1e-3, LoRA/DoRA (any rank)→3e-4
 # 1B: CeRA R64→3e-4, CeRA R128→3e-4, LoRA R64→3e-4, LoRA R128→5e-4, DoRA R64→1e-3, DoRA R128→1e-3
 # 3B: CeRA R64→3e-4, CeRA R128→5e-4, LoRA R64→3e-4, LoRA R128→5e-4, DoRA R64→1e-3, DoRA R128→5e-4
+# R512 (1B/3B math): CeRA 1B→3e-4 3B→5e-4, LoRA 1B/3B→5e-4, DoRA 1B/3B→5e-4 (8B R512 math not swept)
 if [ "$LR" = "best" ]; then
     case "${MODEL_TAG}_${MODEL_TYPE}_${RANK}" in
         Llama-3.2-1B_CeRA_64)   LR="3e-4" ;;
@@ -54,6 +55,12 @@ if [ "$LR" = "best" ]; then
         Llama-3.2-3B_LoRA_128)  LR="5e-4" ;;
         Llama-3.2-3B_DoRA_64)   LR="1e-3" ;;
         Llama-3.2-3B_DoRA_128)  LR="5e-4" ;;
+        Llama-3.2-1B_CeRA_512)  LR="3e-4" ;;
+        Llama-3.2-1B_LoRA_512)  LR="5e-4" ;;
+        Llama-3.2-1B_DoRA_512)  LR="5e-4" ;;
+        Llama-3.2-3B_CeRA_512)  LR="5e-4" ;;
+        Llama-3.2-3B_LoRA_512)  LR="5e-4" ;;
+        Llama-3.2-3B_DoRA_512)  LR="5e-4" ;;
         *_CeRA_64)               LR="3e-4" ;;
         *_CeRA_128)              LR="1e-3" ;;
         *_LoRA_*)                LR="3e-4" ;;
