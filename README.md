@@ -216,7 +216,7 @@ Pass `best` as the LR argument to automatically use the sweep-selected optimum f
 | CeRA   | 128  | 1e-3         | 3e-4         | 5e-4         |
 | LoRA   | 64   | 3e-4         | 3e-4         | 3e-4         |
 | LoRA   | 128  | 3e-4         | 5e-4         | 5e-4         |
-| DoRA   | 64   | 3e-4         | 5e-4         | 5e-4         |
+| DoRA   | 64   | 3e-4         | 1e-3         | 1e-3         |
 | DoRA   | 128  | 3e-4         | 1e-3         | 5e-4         |
 
 ### Large sweeps with job arrays
