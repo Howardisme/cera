@@ -217,10 +217,10 @@ Pass `best` as the LR argument to automatically use the sweep-selected optimum f
 | LoRA   | 64   | 3e-4         | 3e-4         | 3e-4         |
 | LoRA   | 128  | 3e-4         | 5e-4         | 5e-4         |
 | DoRA   | 64   | 3e-4         | 1e-3         | 1e-3         |
-| DoRA   | 128  | 3e-4         | 1e-3         | 5e-4         |
-| CeRA   | 512  | --           | 3e-4         | 5e-4         |
-| LoRA   | 512  | --           | 5e-4         | 5e-4         |
-| DoRA   | 512  | --           | 5e-4         | 5e-4         |
+| DoRA   | 128  | 5e-4         | 1e-3         | 5e-4         |
+| CeRA   | 512  | 3e-4         | 3e-4         | 5e-4         |
+| LoRA   | 512  | 3e-4         | 5e-4         | 5e-4         |
+| DoRA   | 512  | 1e-3         | 5e-4         | 5e-4         |
 
 R512 best LRs are from the 1B/3B `math` sweep; R512 on Llama-3.1-8B (`math`)
 was not swept (`--`). Full per-LR R512 numbers are in the "R512 LR Sweep
