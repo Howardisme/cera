@@ -180,6 +180,9 @@ def _plot_metric(
     methods: List[str],
     ylabel: str,
     title: str,
+    label_size: int = 18,
+    tick_size: int = 15,
+    legend_size: int = 16,
 ):
     for method in methods:
         pts = sorted(data[method].items())
@@ -197,18 +200,18 @@ def _plot_metric(
             linewidth=2,
             markersize=6,
         )
-    ax.set_xlabel("Rank", fontsize=18)
-    ax.set_ylabel(ylabel, fontsize=18)
+    ax.set_xlabel("Rank", fontsize=label_size)
+    ax.set_ylabel(ylabel, fontsize=label_size)
     if title:
-        ax.set_title(title, fontsize=18)
+        ax.set_title(title, fontsize=label_size)
     # Linear x with ticks only at the literal rank values (16, 64, ...).
     all_ranks = sorted({r for m in methods for r in data.get(m, {})})
     if all_ranks:
         ax.set_xticks(all_ranks)
         ax.set_xticklabels([str(r) for r in all_ranks])
         ax.minorticks_off()
-    ax.tick_params(axis="both", which="major", labelsize=15)
-    ax.legend(fontsize=16)
+    ax.tick_params(axis="both", which="major", labelsize=tick_size)
+    ax.legend(fontsize=legend_size)
     ax.grid(True, alpha=0.3)
 
 
@@ -302,12 +305,14 @@ def main():
             axes[-1], manifold_data, args.methods,
             ylabel=f"Manifold Dimensionality\n({pct}% Variance)",
             title="",
+            label_size=24, tick_size=20, legend_size=20,
         )
     if need_er:
         _plot_metric(
             axes[0], er_data, args.methods,
             ylabel="Effective Rank",
             title="",
+            label_size=24, tick_size=20, legend_size=20,
         )
 
     out = Path(args.output)

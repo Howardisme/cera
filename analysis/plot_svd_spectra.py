@@ -133,14 +133,14 @@ def main():
             alpha=RANK_ALPHA.get(rank, 1.0),
             linestyle="-" if method == "CeRA" else "--",
             linewidth=1.8,
-            label=f"{method} R{rank}",
+            label=method,
         )
 
-    ax.set_xlabel("Singular Value Index", fontsize=18)
-    ax.set_ylabel("Singular Value (log scale)", fontsize=18)
+    ax.set_xlabel("Singular Value Index", fontsize=24)
+    ax.set_ylabel("Singular Value\n(log scale)", fontsize=24)
     ax.set_yscale("log")
-    ax.tick_params(axis="both", which="major", labelsize=15)
-    ax.legend(fontsize=14, ncol=2)
+    ax.tick_params(axis="both", which="major", labelsize=20)
+    ax.legend(fontsize=18, ncol=1, loc="lower left")
     ax.grid(True, alpha=0.3)
 
     if args.xmax:
@@ -156,7 +156,7 @@ def main():
             f"Rank Limit ({args.rank_limit})",
             xy=(args.rank_limit, y_arrow),
             xytext=(args.rank_limit * 0.55, y_text),
-            fontsize=13,
+            fontsize=18,
             fontweight="bold",
             ha="center",
             arrowprops=dict(arrowstyle="->", color="black", linewidth=1.2),
