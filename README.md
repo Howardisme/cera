@@ -189,6 +189,15 @@ python analysis/compare_generations.py \
 
 ## Reproducing Paper Results
 
+The exact code used for the CoLM 2026 paper is pinned at the `colm2026` git tag.
+To reproduce the published results, check out that snapshot:
+
+```bash
+git checkout colm2026
+```
+
+The `main` branch may contain later changes; use the tag for an exact match.
+
 See [`paper_experiments/README.md`](paper_experiments/README.md) for a complete guide to reproducing all tables and figures from the paper using Slurm.
 
 ```bash
