@@ -288,10 +288,10 @@ commands from the Evaluation section against the same checkpoint.
 ## Citation
 
 ```bibtex
-@article{chen26cera,
-  title   = {CeRA: Breaking the Linear Ceiling of Low-Rank Adaptation with Inference-Time Non-linearity},
-  author  = {Hung-Hsuan Chen},
-  year    = {2026},
-  journal = {arXiv preprint arXiv:2602.22911}
+@inproceedings{chen26cera,
+  title={CeRA: Breaking the Linear Ceiling of Low-Rank Adaptation with Non-linearity Retained at Inference},
+  author={Chen, Hung-Hsuan},
+  booktitle={Conference on Language Modeling (COLM)},
+  year={2026}
 }
 ```
