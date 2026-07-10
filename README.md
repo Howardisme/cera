@@ -3,7 +3,7 @@
 CeRA is a parameter-efficient fine-tuning (PEFT) method that overcomes LoRA's "linear ceiling" by replacing the low-rank linear delta with a non-linear parallel branch:
 
 ```
-output = W_0(x)  +  down_proj( Dropout( SiLU( up_proj(x) ) ) )
+output = W_0(x)  +  B( Dropout( SiLU( A(x) ) ) )
 ```
 
 Because of the non-linearity, CeRA can express functions outside the column span of the frozen weight matrix W_0, giving the adapter access to the full output space rather than only a low-dimensional subspace.

@@ -4,7 +4,7 @@ CeRA and LoRA adapter definitions -- single source of truth for the whole repo.
 CeRA (Capacity-enhanced Rank Adaptation) injects a non-linear parallel branch
 into each target projection:
 
-    output = W_0 x  +  down_proj( Dropout( act_fn( up_proj(x) ) ) )
+    output = W_0 x  +  B( Dropout( act_fn( A x ) ) )
 
 This breaks LoRA's "linear ceiling": because of the non-linearity, the adapter
 can express functions outside the column span of W_0, giving access to the full
@@ -29,18 +29,24 @@ class CeRAAdapter(nn.Module):
     """
     Two-layer MLP adapter with SiLU gating and structural Dropout.
 
-    Architecture:
-        x  ->  up_proj  ->  act_fn  ->  Dropout  ->  down_proj  ->  delta
+    Architecture (matching Eq. (2) of the paper, delta = B D(sigma(A x))):
+        x  ->  A  ->  act_fn  ->  Dropout  ->  B  ->  delta
 
-    Hidden dimension is set by expansion_factor:
+    A and B follow the LoRA naming convention: A projects the input down to
+    the latent dimension r, B projects back to the output dimension.
+
+    Hidden (latent) dimension is set by expansion_factor:
         hidden_dim = int(input_dim * expansion_factor)
 
     For rank r on a d-dimensional projection (e.g. q_proj in Llama-3-8B, d=4096):
         expansion_factor = r / d
 
     Initialization:
-        up_proj   : Kaiming normal  (safe for SiLU / ReLU)
-        down_proj : zeros           (adapter contributes nothing at step 0)
+        A : Kaiming normal  (safe for SiLU / ReLU)
+        B : zeros           (adapter contributes nothing at step 0)
+
+    Checkpoints saved before the 2026-07 A/B rename use the legacy key names
+    up_proj/down_proj; _load_from_state_dict remaps them.
     """
 
     def __init__(
@@ -56,7 +62,7 @@ class CeRAAdapter(nn.Module):
         super().__init__()
         hidden_dim = int(input_dim * expansion_factor)
 
-        self.up_proj = nn.Linear(input_dim, hidden_dim, bias=False, device=device, dtype=dtype)
+        self.A = nn.Linear(input_dim, hidden_dim, bias=False, device=device, dtype=dtype)
 
         if act_fn == "silu":
             self.act_fn = nn.SiLU()
@@ -69,7 +75,7 @@ class CeRAAdapter(nn.Module):
                 f"Unknown activation {act_fn!r}. Choose from 'silu', 'relu', 'identity'."
             )
 
-        self.down_proj = nn.Linear(hidden_dim, output_dim, bias=False, device=device, dtype=dtype)
+        self.B = nn.Linear(hidden_dim, output_dim, bias=False, device=device, dtype=dtype)
         self.dropout = nn.Dropout(dropout)
 
         # Activation tracking -- enable before a forward pass to capture last_delta
@@ -77,11 +83,25 @@ class CeRAAdapter(nn.Module):
         self.track_activation: bool = False
         self.last_delta: Optional[torch.Tensor] = None
 
-        nn.init.kaiming_normal_(self.up_proj.weight, nonlinearity="relu")
-        nn.init.zeros_(self.down_proj.weight)
+        nn.init.kaiming_normal_(self.A.weight, nonlinearity="relu")
+        nn.init.zeros_(self.B.weight)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        # Backward compatibility: checkpoints saved before the A/B rename
+        # (2026-07) store the projections as up_proj/down_proj.
+        # Remap the legacy keys in place. Without this remap, strict=False
+        # loading would silently skip both matrices and (because B is
+        # zero-initialized) evaluate the frozen base model.
+        for old_name, new_name in (("up_proj", "A"), ("down_proj", "B")):
+            old_key = f"{prefix}{old_name}.weight"
+            if old_key in state_dict:
+                state_dict[f"{prefix}{new_name}.weight"] = state_dict.pop(old_key)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        delta = self.down_proj(self.dropout(self.act_fn(self.up_proj(x))))
+        delta = self.B(self.dropout(self.act_fn(self.A(x))))
         if self.track_activation:
             self.last_delta = delta.detach().cpu().float()
         return delta

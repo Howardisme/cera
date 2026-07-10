@@ -5,7 +5,7 @@
 # -------
 # Table 3 reports "(b) Identity (Linear)" CeRA with ER ~354, far above LoRA
 # (~60). Identity-activation CeRA with no dropout is the same FUNCTIONAL class
-# as LoRA (a rank-r linear map down_proj(up_proj(x))), so if its ER stays high
+# as LoRA (a rank-r linear map B(A(x))), so if its ER stays high
 # the gap cannot be attributed to the non-linearity. This control isolates that:
 #
 #   CeRA, act_fn=identity, dropout=0.0, rank=512, q_proj+v_proj, orca, lr=5e-4
