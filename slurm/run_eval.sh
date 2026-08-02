@@ -57,8 +57,10 @@ module purge
 module load singularity
 
 # Singularity paths (override via env vars in ~/.bashrc; defaults assume /work/$USER layout).
+# Extra python packages come from $PYPKGS (installed via `pip install --target=`);
+# container's own torch/CUDA stack takes precedence, so $PYPKGS must NOT contain torch/nvidia*.
 SIF="${CERA_SIF:-/work/$USER/cera.sif}"
-OVERLAY="${CERA_OVERLAY:-/work/$USER/cera_overlay.img}"
+PYPKGS="${CERA_PYPKGS:-/work/$USER/cera_pypkgs}"
 HF_CACHE="${CERA_HF_HOME:-/work/$USER/hf_cache}"
 mkdir -p "$HF_CACHE"
 
@@ -163,7 +165,11 @@ echo "  Output dir  : ${OUT_DIR}"
 # ── 1. MATH pass@1 (greedy, 500 problems) ─────────────────────────────────────
 if [ ! -f "${OUT_DIR}/math_pass1.json" ]; then
     echo "[EVAL 1/3] MATH pass@1 (greedy, 500 problems)..."
-    singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "${OVERLAY}:ro" "$SIF" \
+    singularity exec --nv -B /work \
+        --env PYTHONPATH="$PYPKGS" \
+        --env PYTHONNOUSERSITE=1 \
+        --env HF_HOME="$HF_CACHE" \
+        "$SIF" \
         python evaluate.py \
             --base_model              "$BASE_MODEL" \
             --adapter_type            "$METHOD_LOWER" \
@@ -198,7 +204,11 @@ fi
 # ── 2. MATH pass@10 (sampling, n=10, 500 problems) ────────────────────────────
 if [ ! -f "${OUT_DIR}/math_pass10.json" ]; then
     echo "[EVAL 2/3] MATH pass@10 (sampling n=10, 500 problems)..."
-    singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "${OVERLAY}:ro" "$SIF" \
+    singularity exec --nv -B /work \
+        --env PYTHONPATH="$PYPKGS" \
+        --env PYTHONNOUSERSITE=1 \
+        --env HF_HOME="$HF_CACHE" \
+        "$SIF" \
         python evaluate.py \
             --base_model              "$BASE_MODEL" \
             --adapter_type            "$METHOD_LOWER" \
@@ -248,7 +258,11 @@ fi
 # ── 3. GSM8K pass@1 (greedy, full 1319 problems) ──────────────────────────────
 if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then
     echo "[EVAL 3/3] GSM8K pass@1 (greedy, 1319 problems)..."
-    singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "${OVERLAY}:ro" "$SIF" \
+    singularity exec --nv -B /work \
+        --env PYTHONPATH="$PYPKGS" \
+        --env PYTHONNOUSERSITE=1 \
+        --env HF_HOME="$HF_CACHE" \
+        "$SIF" \
         python evaluate.py \
             --base_model              "$BASE_MODEL" \
             --adapter_type            "$METHOD_LOWER" \

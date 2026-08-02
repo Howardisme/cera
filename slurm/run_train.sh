@@ -80,8 +80,11 @@ module purge
 module load singularity
 
 # Singularity paths (override via env vars in ~/.bashrc; defaults assume /work/$USER layout).
+# Extra python packages are installed into $PYPKGS via `pip install --target=$PYPKGS ...`
+# from inside the container; runtime picks them up via PYTHONPATH. Container's own
+# torch/CUDA stack is preferred, so $PYPKGS must NOT contain torch/nvidia* dirs.
 SIF="${CERA_SIF:-/work/$USER/cera.sif}"
-OVERLAY="${CERA_OVERLAY:-/work/$USER/cera_overlay.img}"
+PYPKGS="${CERA_PYPKGS:-/work/$USER/cera_pypkgs}"
 HF_CACHE="${CERA_HF_HOME:-/work/$USER/hf_cache}"
 mkdir -p "$HF_CACHE"
 
@@ -90,7 +93,11 @@ mkdir -p slurm_logs
 
 echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"
 
-singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "${OVERLAY}:ro" "$SIF" \
+singularity exec --nv -B /work \
+    --env PYTHONPATH="$PYPKGS" \
+    --env PYTHONNOUSERSITE=1 \
+    --env HF_HOME="$HF_CACHE" \
+    "$SIF" \
     python train.py \
         --model_type  "$MODEL_TYPE" \
         --rank        "$RANK" \
