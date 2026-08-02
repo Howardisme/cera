@@ -53,10 +53,8 @@ if [ -z "$DROPOUT" ]; then
     exit 1
 fi
 
-# Activate your environment here, e.g.:
-#   conda activate cera_env
-# or:
-#   source /path/to/venv/bin/activate
+ml load miniconda3 cuda/12.6
+source activate cera
 
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
