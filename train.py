@@ -145,10 +145,19 @@ def main():
     tgt_str   = args.target_modules.replace(",", "_")
     model_tag = args.base_model.split("/")[-1]
     model_suffix = f"_{model_tag}" if args.base_model != DEFAULT_MODEL else ""
+    # LoRA/DoRA runs at alpha != 32 (default) get a `_A{alpha}` suffix so the
+    # scale-matched (alpha=rank) folders do not collide with the default runs.
+    # CeRA has no alpha, and the historical alpha=32 folders stay un-suffixed
+    # for backward compatibility with existing checkpoints and glob patterns.
+    alpha_suffix = (
+        f"_A{args.alpha}"
+        if args.model_type in ("LoRA", "DoRA") and args.alpha != 32
+        else ""
+    )
     exp_name  = (
         f"Exp_{args.model_type}_{args.dataset}"
         f"_R{args.rank}_lr{args.lr}_{args.act_fn}_{tgt_str}"
-        f"_D{args.dropout}_E{args.epochs}{model_suffix}_{timestamp}"
+        f"_D{args.dropout}_E{args.epochs}{alpha_suffix}{model_suffix}_{timestamp}"
     )
     base_save = os.path.join(WORK_DIR, "results", exp_name)
     results_root = os.path.realpath(os.path.join(WORK_DIR, "results"))

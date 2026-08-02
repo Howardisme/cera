@@ -52,8 +52,12 @@ find_checkpoint() {
     local method=$1; local rank=$2; local lr=$3; local dropout=$4
     local lr_dec=$(lr_to_decimal "$lr")
     local method_lower=$(echo "$method" | tr '[:upper:]' '[:lower:]')
+    # Main comparison always trains LoRA/DoRA at alpha=32 (default), which
+    # produces folders WITHOUT any _A{n} suffix. Exclude _A{n} folders so
+    # scale-matched runs (submit_scale_matched_comparison.sh) do not shadow
+    # the alpha=32 checkpoints here.
     local dir=$(ls -dt "results/Exp_${method}_math_R${rank}_lr${lr_dec}_"* 2>/dev/null \
-        | grep "_D${dropout}" | head -1)
+        | grep "_D${dropout}" | grep -v "_A[0-9]" | head -1)
     if [ -n "$dir" ]; then
         ls "${dir}/${method}/${method_lower}_ckpt_best_"*.pt 2>/dev/null | head -1
     fi

@@ -13,7 +13,7 @@
 # Run all 3 evaluations (MATH pass@1, MATH pass@10, GSM8K pass@1) for one cell.
 #
 # Usage:
-#   sbatch slurm/run_eval.sh CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR] [DATASET]
+#   sbatch slurm/run_eval.sh CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR] [DATASET] [ALPHA]
 #
 # Arguments:
 #   CELL_ID     unique identifier for this eval cell (e.g. r128_cera_lr5e-4)
@@ -24,6 +24,10 @@
 #   BASE_MODEL  HuggingFace model ID (default: meta-llama/Llama-3.1-8B)
 #   OUTPUT_DIR  base output directory (default: results/eval_outputs)
 #   DATASET     training dataset tag for the checkpoint search (default: math)
+#   ALPHA       LoRA/DoRA alpha; effective scale = alpha/rank (default: 32).
+#               Ignored by CeRA. When ALPHA == 32 the folder search excludes any
+#               _A{n} suffix (historical default); when ALPHA != 32 the search
+#               requires _A{ALPHA}. Must match the training-time alpha.
 #
 # Checkpoint is located automatically from:
 #   results/Exp_<METHOD>_<DATASET>_R<RANK>_lr<LR_DEC>_*/<METHOD>/*_ckpt_best_*.pt
@@ -42,9 +46,10 @@ DROPOUT=${5}
 BASE_MODEL=${6:-meta-llama/Llama-3.1-8B}
 OUTPUT_DIR=${7:-results/eval_outputs}
 DATASET=${8:-math}   # training dataset tag used to locate the checkpoint dir
+ALPHA=${9:-32}
 
 if [ -z "$DROPOUT" ]; then
-    echo "[ERROR] Usage: $0 CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR]"
+    echo "[ERROR] Usage: $0 CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR] [DATASET] [ALPHA]"
     exit 1
 fi
 
@@ -107,18 +112,31 @@ esac
 # Find the most recent matching results/ directory.
 # train.py appends _{MODEL_TAG} only for non-default models, so we must
 # filter by model size to avoid picking up a checkpoint from a different model.
+# train.py appends _A{ALPHA} to LoRA/DoRA runs when ALPHA != 32; add a matching
+# filter so scale-matched folders do not collide with the default alpha=32 runs.
 DEFAULT_MODEL_TAG="Llama-3.1-8B"
+CANDIDATES=$(ls -dt results/Exp_${METHOD}_${DATASET}_R${RANK}_lr${LR_DECIMAL}_* 2>/dev/null \
+    | grep "_D${DROPOUT}")
 if [ "$MODEL_TAG" = "$DEFAULT_MODEL_TAG" ]; then
     # Default model dirs have no model-size suffix → exclude any non-default model dir
-    RESULTS_DIR=$(ls -dt results/Exp_${METHOD}_${DATASET}_R${RANK}_lr${LR_DECIMAL}_* 2>/dev/null \
-        | grep "_D${DROPOUT}" | grep -v "_Llama-3\." | head -1)
+    CANDIDATES=$(echo "$CANDIDATES" | grep -v "_Llama-3\.")
 else
     # Non-default model dirs contain _<MODEL_TAG> → require it
-    RESULTS_DIR=$(ls -dt results/Exp_${METHOD}_${DATASET}_R${RANK}_lr${LR_DECIMAL}_* 2>/dev/null \
-        | grep "_D${DROPOUT}" | grep "_${MODEL_TAG}" | head -1)
+    CANDIDATES=$(echo "$CANDIDATES" | grep "_${MODEL_TAG}")
 fi
+# Alpha filter (only meaningful for LoRA/DoRA; CeRA folders never carry _A).
+if [ "$METHOD" != "CeRA" ]; then
+    if [ "$ALPHA" = "32" ]; then
+        # Default alpha → exclude any explicit _A{n} suffix
+        CANDIDATES=$(echo "$CANDIDATES" | grep -v "_A[0-9]")
+    else
+        # Non-default alpha → require the matching _A{ALPHA} tag
+        CANDIDATES=$(echo "$CANDIDATES" | grep "_A${ALPHA}")
+    fi
+fi
+RESULTS_DIR=$(echo "$CANDIDATES" | head -1)
 if [ -z "$RESULTS_DIR" ]; then
-    echo "[ERROR] No results/ directory found for METHOD=${METHOD} DATASET=${DATASET} RANK=${RANK} LR=${LR_DECIMAL} D=${DROPOUT} MODEL=${MODEL_TAG}"
+    echo "[ERROR] No results/ directory found for METHOD=${METHOD} DATASET=${DATASET} RANK=${RANK} LR=${LR_DECIMAL} D=${DROPOUT} A=${ALPHA} MODEL=${MODEL_TAG}"
     exit 1
 fi
 
@@ -133,7 +151,7 @@ export OUT_DIR_PY="$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
 START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-echo "[START] eval | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR}"
+echo "[START] eval | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} A=${ALPHA}"
 echo "  Results dir : ${RESULTS_DIR}"
 echo "  Checkpoint  : ${CHECKPOINT}"
 echo "  Output dir  : ${OUT_DIR}"
@@ -145,6 +163,7 @@ if [ ! -f "${OUT_DIR}/math_pass1.json" ]; then
         --base_model              "$BASE_MODEL" \
         --adapter_type            "$METHOD_LOWER" \
         --rank                    "$RANK" \
+        --alpha                   "$ALPHA" \
         --dropout                 "$DROPOUT" \
         --checkpoint              "$CHECKPOINT" \
         --dataset                 math \
@@ -178,6 +197,7 @@ if [ ! -f "${OUT_DIR}/math_pass10.json" ]; then
         --base_model              "$BASE_MODEL" \
         --adapter_type            "$METHOD_LOWER" \
         --rank                    "$RANK" \
+        --alpha                   "$ALPHA" \
         --dropout                 "$DROPOUT" \
         --checkpoint              "$CHECKPOINT" \
         --dataset                 math \
@@ -226,6 +246,7 @@ if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then
         --base_model              "$BASE_MODEL" \
         --adapter_type            "$METHOD_LOWER" \
         --rank                    "$RANK" \
+        --alpha                   "$ALPHA" \
         --dropout                 "$DROPOUT" \
         --checkpoint              "$CHECKPOINT" \
         --dataset                 gsm8k \
@@ -281,6 +302,7 @@ meta = {
     "method":           "${METHOD}",
     "lr":               "${LR}",
     "dropout":          float("${DROPOUT}"),
+    "alpha":            int("${ALPHA}") if "${METHOD}" != "CeRA" else None,
     "base_model":       "${BASE_MODEL}",
     "best_val_ppl":     round(best_ppl, 4) if best_ppl is not None else None,
     "best_val_step":    best_step,

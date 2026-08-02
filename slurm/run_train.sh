@@ -11,7 +11,7 @@
 #   #SBATCH -A YOUR_ACCOUNT
 
 # Usage:
-#   sbatch slurm/run_train.sh MODEL_TYPE RANK LR DROPOUT DATASET [EPOCHS] [BASE_MODEL]
+#   sbatch slurm/run_train.sh MODEL_TYPE RANK LR DROPOUT DATASET [EPOCHS] [BASE_MODEL] [ALPHA]
 #
 # Arguments:
 #   MODEL_TYPE  CeRA | LoRA | DoRA
@@ -21,10 +21,13 @@
 #   DATASET     math | code | orca
 #   EPOCHS      number of training epochs (default: 3)
 #   BASE_MODEL  HuggingFace model ID (default: meta-llama/Llama-3.1-8B)
+#   ALPHA       LoRA/DoRA alpha; effective scale = alpha / rank (default: 32).
+#               Ignored by CeRA. Pass alpha=rank for the scale-matched (s=1) control.
 #
 # Example:
 #   sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
 #   sbatch slurm/run_train.sh LoRA 128 5e-4 0.0 math 3 meta-llama/Llama-3.2-3B
+#   sbatch slurm/run_train.sh LoRA 128 5e-4 0.0 math 3 meta-llama/Llama-3.1-8B 128   # scale-matched
 
 MODEL_TYPE=${1:-CeRA}
 RANK=${2:-128}
@@ -33,6 +36,7 @@ DROPOUT=${4:-0.1}
 DATASET=${5:-math}
 EPOCHS=${6:-3}
 BASE_MODEL=${7:-meta-llama/Llama-3.1-8B}
+ALPHA=${8:-32}
 
 MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
 
@@ -80,7 +84,7 @@ fi
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
-echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"
+echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"
 
 python train.py \
     --model_type  "$MODEL_TYPE" \
@@ -89,6 +93,7 @@ python train.py \
     --dropout     "$DROPOUT" \
     --dataset     "$DATASET" \
     --epochs      "$EPOCHS" \
-    --base_model  "$BASE_MODEL"
+    --base_model  "$BASE_MODEL" \
+    --alpha       "$ALPHA"
 
 echo "[END] Finished at $(date)"
