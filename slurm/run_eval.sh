@@ -53,9 +53,14 @@ if [ -z "$DROPOUT" ]; then
     exit 1
 fi
 
-ml load miniconda3 cuda/12.6
-source /work/envstack/apps/miniconda3/26.1.1/etc/profile.d/conda.sh
-conda activate cera
+module purge
+module load singularity
+
+# Singularity paths (override via env vars in ~/.bashrc; defaults assume /work/$USER layout).
+SIF="${CERA_SIF:-/work/$USER/cera.sif}"
+OVERLAY="${CERA_OVERLAY:-/work/$USER/cera_overlay.img}"
+HF_CACHE="${CERA_HF_HOME:-/work/$USER/hf_cache}"
+mkdir -p "$HF_CACHE"
 
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
@@ -158,20 +163,21 @@ echo "  Output dir  : ${OUT_DIR}"
 # ── 1. MATH pass@1 (greedy, 500 problems) ─────────────────────────────────────
 if [ ! -f "${OUT_DIR}/math_pass1.json" ]; then
     echo "[EVAL 1/3] MATH pass@1 (greedy, 500 problems)..."
-    python evaluate.py \
-        --base_model              "$BASE_MODEL" \
-        --adapter_type            "$METHOD_LOWER" \
-        --rank                    "$RANK" \
-        --alpha                   "$ALPHA" \
-        --dropout                 "$DROPOUT" \
-        --checkpoint              "$CHECKPOINT" \
-        --dataset                 math \
-        --num_samples_per_problem 1 \
-        --temperature             0 \
-        --batch_size              4 \
-        --max_new_tokens          1024 \
-        --num_samples             500 \
-        --output_jsonl            "${OUT_DIR}/math_pass1.jsonl"
+    singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "$OVERLAY" "$SIF" \
+        python evaluate.py \
+            --base_model              "$BASE_MODEL" \
+            --adapter_type            "$METHOD_LOWER" \
+            --rank                    "$RANK" \
+            --alpha                   "$ALPHA" \
+            --dropout                 "$DROPOUT" \
+            --checkpoint              "$CHECKPOINT" \
+            --dataset                 math \
+            --num_samples_per_problem 1 \
+            --temperature             0 \
+            --batch_size              4 \
+            --max_new_tokens          1024 \
+            --num_samples             500 \
+            --output_jsonl            "${OUT_DIR}/math_pass1.jsonl"
 
     python3 - <<'PYEOF'
 import json, os
@@ -192,21 +198,22 @@ fi
 # ── 2. MATH pass@10 (sampling, n=10, 500 problems) ────────────────────────────
 if [ ! -f "${OUT_DIR}/math_pass10.json" ]; then
     echo "[EVAL 2/3] MATH pass@10 (sampling n=10, 500 problems)..."
-    python evaluate.py \
-        --base_model              "$BASE_MODEL" \
-        --adapter_type            "$METHOD_LOWER" \
-        --rank                    "$RANK" \
-        --alpha                   "$ALPHA" \
-        --dropout                 "$DROPOUT" \
-        --checkpoint              "$CHECKPOINT" \
-        --dataset                 math \
-        --num_samples_per_problem 10 \
-        --temperature             0.8 \
-        --top_p                   0.95 \
-        --batch_size              4 \
-        --max_new_tokens          1024 \
-        --num_samples             500 \
-        --output_jsonl            "${OUT_DIR}/math_pass10.jsonl"
+    singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "$OVERLAY" "$SIF" \
+        python evaluate.py \
+            --base_model              "$BASE_MODEL" \
+            --adapter_type            "$METHOD_LOWER" \
+            --rank                    "$RANK" \
+            --alpha                   "$ALPHA" \
+            --dropout                 "$DROPOUT" \
+            --checkpoint              "$CHECKPOINT" \
+            --dataset                 math \
+            --num_samples_per_problem 10 \
+            --temperature             0.8 \
+            --top_p                   0.95 \
+            --batch_size              4 \
+            --max_new_tokens          1024 \
+            --num_samples             500 \
+            --output_jsonl            "${OUT_DIR}/math_pass10.jsonl"
 
     python3 - <<'PYEOF'
 import json, os
@@ -241,19 +248,20 @@ fi
 # ── 3. GSM8K pass@1 (greedy, full 1319 problems) ──────────────────────────────
 if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then
     echo "[EVAL 3/3] GSM8K pass@1 (greedy, 1319 problems)..."
-    python evaluate.py \
-        --base_model              "$BASE_MODEL" \
-        --adapter_type            "$METHOD_LOWER" \
-        --rank                    "$RANK" \
-        --alpha                   "$ALPHA" \
-        --dropout                 "$DROPOUT" \
-        --checkpoint              "$CHECKPOINT" \
-        --dataset                 gsm8k \
-        --num_samples_per_problem 1 \
-        --temperature             0 \
-        --batch_size              4 \
-        --max_new_tokens          512 \
-        --output_jsonl            "${OUT_DIR}/gsm8k_pass1.jsonl"
+    singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "$OVERLAY" "$SIF" \
+        python evaluate.py \
+            --base_model              "$BASE_MODEL" \
+            --adapter_type            "$METHOD_LOWER" \
+            --rank                    "$RANK" \
+            --alpha                   "$ALPHA" \
+            --dropout                 "$DROPOUT" \
+            --checkpoint              "$CHECKPOINT" \
+            --dataset                 gsm8k \
+            --num_samples_per_problem 1 \
+            --temperature             0 \
+            --batch_size              4 \
+            --max_new_tokens          512 \
+            --output_jsonl            "${OUT_DIR}/gsm8k_pass1.jsonl"
 
     python3 - <<'PYEOF'
 import json, os

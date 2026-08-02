@@ -76,23 +76,29 @@ if [ "$LR" = "best" ]; then
     echo "[INFO] Resolved LR=best → ${LR} for ${MODEL_TAG} ${MODEL_TYPE} R=${RANK}"
 fi
 
-ml load miniconda3 cuda/12.6
-source /work/envstack/apps/miniconda3/26.1.1/etc/profile.d/conda.sh
-conda activate cera
+module purge
+module load singularity
+
+# Singularity paths (override via env vars in ~/.bashrc; defaults assume /work/$USER layout).
+SIF="${CERA_SIF:-/work/$USER/cera.sif}"
+OVERLAY="${CERA_OVERLAY:-/work/$USER/cera_overlay.img}"
+HF_CACHE="${CERA_HF_HOME:-/work/$USER/hf_cache}"
+mkdir -p "$HF_CACHE"
 
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
 echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"
 
-python train.py \
-    --model_type  "$MODEL_TYPE" \
-    --rank        "$RANK" \
-    --lr          "$LR" \
-    --dropout     "$DROPOUT" \
-    --dataset     "$DATASET" \
-    --epochs      "$EPOCHS" \
-    --base_model  "$BASE_MODEL" \
-    --alpha       "$ALPHA"
+singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "$OVERLAY" "$SIF" \
+    python train.py \
+        --model_type  "$MODEL_TYPE" \
+        --rank        "$RANK" \
+        --lr          "$LR" \
+        --dropout     "$DROPOUT" \
+        --dataset     "$DATASET" \
+        --epochs      "$EPOCHS" \
+        --base_model  "$BASE_MODEL" \
+        --alpha       "$ALPHA"
 
 echo "[END] Finished at $(date)"
