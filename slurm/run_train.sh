@@ -90,7 +90,7 @@ mkdir -p slurm_logs
 
 echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"
 
-singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "$OVERLAY" "$SIF" \
+singularity exec --nv -B /work --env HF_HOME="$HF_CACHE" --overlay "${OVERLAY}:ro" "$SIF" \
     python train.py \
         --model_type  "$MODEL_TYPE" \
         --rank        "$RANK" \
