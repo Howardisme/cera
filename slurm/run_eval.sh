@@ -54,7 +54,8 @@ if [ -z "$DROPOUT" ]; then
 fi
 
 ml load miniconda3 cuda/12.6
-source activate cera
+source /work/envstack/apps/miniconda3/26.1.1/etc/profile.d/conda.sh
+conda activate cera
 
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
