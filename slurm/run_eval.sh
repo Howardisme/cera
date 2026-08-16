@@ -33,10 +33,15 @@
 #   results/Exp_<METHOD>_<DATASET>_R<RANK>_lr<LR_DEC>_*/<METHOD>/*_ckpt_best_*.pt
 #
 # Outputs written to: OUTPUT_DIR/CELL_ID/
-#   math_pass1.json, math_pass1.jsonl
-#   math_pass10.json, math_pass10.jsonl
+#   math500_pass1.json, math500_pass1.jsonl    (HuggingFaceH4/MATH-500, Q/A prompt)
+#   math500_pass10.json, math500_pass10.jsonl
 #   gsm8k_pass1.json, gsm8k_pass1.jsonl
 #   cell_metadata.json
+#
+# NOTE: filenames changed from math_pass{1,10} → math500_pass{1,10} in this
+# revision. Old-format results/eval_outputs/*/math_pass*.json files from the
+# paper-Table-1 eval (DigitalLearningGmbH/MATH-lighteval, Problem:/Solution:
+# prompt) will NOT collide with new runs.
 
 CELL_ID=${1}
 METHOD=${2}
@@ -162,9 +167,9 @@ echo "  Results dir : ${RESULTS_DIR}"
 echo "  Checkpoint  : ${CHECKPOINT}"
 echo "  Output dir  : ${OUT_DIR}"
 
-# ── 1. MATH pass@1 (greedy, 500 problems) ─────────────────────────────────────
-if [ ! -f "${OUT_DIR}/math_pass1.json" ]; then
-    echo "[EVAL 1/3] MATH pass@1 (greedy, 500 problems)..."
+# ── 1. MATH-500 pass@1 (greedy, HuggingFaceH4/MATH-500, Question:/Answer: prompt) ─
+if [ ! -f "${OUT_DIR}/math500_pass1.json" ]; then
+    echo "[EVAL 1/3] MATH-500 pass@1 (greedy, 500 problems, Question:/Answer: prompt)..."
     singularity exec --nv -B /work \
         --env PYTHONPATH="$PYPKGS" \
         --env PYTHONNOUSERSITE=1 \
@@ -177,33 +182,32 @@ if [ ! -f "${OUT_DIR}/math_pass1.json" ]; then
             --alpha                   "$ALPHA" \
             --dropout                 "$DROPOUT" \
             --checkpoint              "$CHECKPOINT" \
-            --dataset                 math \
+            --dataset                 math500 \
             --num_samples_per_problem 1 \
             --temperature             0 \
             --batch_size              4 \
             --max_new_tokens          1024 \
-            --num_samples             500 \
-            --output_jsonl            "${OUT_DIR}/math_pass1.jsonl"
+            --output_jsonl            "${OUT_DIR}/math500_pass1.jsonl"
 
     python3 - <<'PYEOF'
 import json, os
 out_dir = os.environ["OUT_DIR_PY"]
-with open(f"{out_dir}/math_pass1.jsonl") as fh:
+with open(f"{out_dir}/math500_pass1.jsonl") as fh:
     records = [json.loads(l) for l in fh]
 n_correct = sum(1 for r in records if r.get("n_correct", 0) > 0)
 n_total = len(records)
 pct = round(100.0 * n_correct / n_total, 2) if n_total > 0 else 0.0
-with open(f"{out_dir}/math_pass1.json", "w") as fh:
+with open(f"{out_dir}/math500_pass1.json", "w") as fh:
     json.dump({"n_correct": n_correct, "n_total": n_total, "pass1": pct}, fh)
-print(f"[MATH pass@1] {n_correct}/{n_total} = {pct}%")
+print(f"[MATH-500 pass@1] {n_correct}/{n_total} = {pct}%")
 PYEOF
 else
-    echo "[SKIP] math_pass1.json already exists"
+    echo "[SKIP] math500_pass1.json already exists"
 fi
 
-# ── 2. MATH pass@10 (sampling, n=10, 500 problems) ────────────────────────────
-if [ ! -f "${OUT_DIR}/math_pass10.json" ]; then
-    echo "[EVAL 2/3] MATH pass@10 (sampling n=10, 500 problems)..."
+# ── 2. MATH-500 pass@10 (sampling, n=10, HuggingFaceH4/MATH-500) ──────────────
+if [ ! -f "${OUT_DIR}/math500_pass10.json" ]; then
+    echo "[EVAL 2/3] MATH-500 pass@10 (sampling n=10, 500 problems)..."
     singularity exec --nv -B /work \
         --env PYTHONPATH="$PYPKGS" \
         --env PYTHONNOUSERSITE=1 \
@@ -216,20 +220,19 @@ if [ ! -f "${OUT_DIR}/math_pass10.json" ]; then
             --alpha                   "$ALPHA" \
             --dropout                 "$DROPOUT" \
             --checkpoint              "$CHECKPOINT" \
-            --dataset                 math \
+            --dataset                 math500 \
             --num_samples_per_problem 10 \
             --temperature             0.8 \
             --top_p                   0.95 \
             --batch_size              4 \
             --max_new_tokens          1024 \
-            --num_samples             500 \
-            --output_jsonl            "${OUT_DIR}/math_pass10.jsonl"
+            --output_jsonl            "${OUT_DIR}/math500_pass10.jsonl"
 
     python3 - <<'PYEOF'
 import json, os
 from math import comb
 out_dir = os.environ["OUT_DIR_PY"]
-with open(f"{out_dir}/math_pass10.jsonl") as fh:
+with open(f"{out_dir}/math500_pass10.jsonl") as fh:
     records = [json.loads(l) for l in fh]
 k = 10
 pass10_list, any_correct_list = [], []
@@ -247,12 +250,12 @@ for r in records:
 n_total = len(records)
 pass10 = round(100.0 * sum(pass10_list) / n_total, 2) if n_total > 0 else 0.0
 any_correct = round(100.0 * sum(any_correct_list) / n_total, 2) if n_total > 0 else 0.0
-with open(f"{out_dir}/math_pass10.json", "w") as fh:
+with open(f"{out_dir}/math500_pass10.json", "w") as fh:
     json.dump({"pass10_unbiased": pass10, "any_correct_rate": any_correct, "n_total": n_total}, fh)
-print(f"[MATH pass@10] unbiased={pass10}%  any_correct={any_correct}%")
+print(f"[MATH-500 pass@10] unbiased={pass10}%  any_correct={any_correct}%")
 PYEOF
 else
-    echo "[SKIP] math_pass10.json already exists"
+    echo "[SKIP] math500_pass10.json already exists"
 fi
 
 # ── 3. GSM8K pass@1 (greedy, full 1319 problems) ──────────────────────────────

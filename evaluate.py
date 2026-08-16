@@ -108,11 +108,15 @@ def parse_args() -> argparse.Namespace:
 
     # -- Dataset --
     p.add_argument(
-        "--dataset", choices=["gsm8k", "mathinstruct", "math"], default="gsm8k",
+        "--dataset", choices=["gsm8k", "mathinstruct", "math", "math500"], default="gsm8k",
         help=(
             "Benchmark to evaluate on. "
-            "'math' = DigitalLearningGmbH/MATH-lighteval (5000 test problems). "
-            "Recommend --max_new_tokens 1024 for 'math'."
+            "'math' = DigitalLearningGmbH/MATH-lighteval (5000 test problems, "
+            "'Problem:/Solution:' prompt -- matches paper Table 1). "
+            "'math500' = HuggingFaceH4/MATH-500 (community-standard 500-problem "
+            "subset, 'Question:/Answer:' prompt -- aligned with MathInstruct "
+            "training format, breaks paper Table 1 comparability by design). "
+            "Recommend --max_new_tokens 1024 for both."
         ),
     )
     p.add_argument(
@@ -251,6 +255,22 @@ def load_eval_dataset(args: argparse.Namespace) -> List[Dict]:
                 "gold_raw": s["output"],
             }
             for s in subset
+        ]
+
+    elif args.dataset == "math500":
+        # HuggingFaceH4/MATH-500: community-standard 500-problem subset of Hendrycks
+        # MATH. Uses 'Question:/Answer:' prompt to align with MathInstruct training
+        # format (see cera/data.py:fmt_math) -- deliberate departure from paper
+        # Table 1 to remove the train/eval prompt-distribution-shift confound.
+        # The 'answer' field is the pre-extracted final answer string (no \boxed{}
+        # wrapping), so we skip extract_boxed for the gold side downstream.
+        ds = load_dataset("HuggingFaceH4/MATH-500", split="test")
+        samples = [
+            {
+                "prompt":   f"Question: {s['problem']}\nAnswer:",
+                "gold_raw": s["answer"],
+            }
+            for s in ds
         ]
 
     else:  # math (competition-level, DigitalLearningGmbH/MATH-lighteval)
@@ -430,14 +450,18 @@ def run_evaluation(
         gen_tokens = out_ids[:, prompt_len:]
         generated  = tokenizer.batch_decode(gen_tokens, skip_special_tokens=True)
 
-        is_math_comp = args.dataset == "math"
+        is_math_comp = args.dataset in ("math", "math500")
         _normalize   = normalize_latex if is_math_comp else normalize
 
         for prob_idx, (prompt, gold_raw) in enumerate(zip(prompts, golds_raw)):
             gens_for_prob = generated[prob_idx * n_per_prob : (prob_idx + 1) * n_per_prob]
 
-            if is_math_comp:
+            if args.dataset == "math":
                 extracted_gold = extract_boxed(gold_raw)
+            elif args.dataset == "math500":
+                # HuggingFaceH4/MATH-500 'answer' field is already the extracted
+                # final answer string (no \boxed{} wrapping) -- use as-is.
+                extracted_gold = gold_raw
             elif args.dataset == "mathinstruct":
                 extracted_gold = extract_answer(gold_raw)
             else:
