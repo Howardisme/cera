@@ -36,6 +36,7 @@
 #   math500_pass1.json, math500_pass1.jsonl    (HuggingFaceH4/MATH-500, Q/A prompt)
 #   math500_pass10.json, math500_pass10.jsonl
 #   gsm8k_pass1.json, gsm8k_pass1.jsonl
+#   math_hard_pass1.json, math_hard_pass1.jsonl  (MATH-lighteval level=='Level 5', Q/A prompt)
 #   cell_metadata.json
 #
 # NOTE: filenames changed from math_pass{1,10} → math500_pass{1,10} in this
@@ -296,7 +297,48 @@ else
     echo "[SKIP] gsm8k_pass1.json already exists"
 fi
 
-# ── 4. cell_metadata.json ─────────────────────────────────────────────────────
+# ── 4. MATH Level 5 pass@1 (greedy, ~1324 problems, Question:/Answer: prompt) ─
+# Third difficulty point between MATH-500 (medium) and AMC/AIME (hard).
+# pass@1 only -- pass@10 would cost ~10-13h/cell, not justified for a single
+# hypothesis-validation datapoint.
+if [ ! -f "${OUT_DIR}/math_hard_pass1.json" ]; then
+    echo "[EVAL 4/4] MATH Level 5 pass@1 (greedy, ~1324 problems)..."
+    singularity exec --nv -B /work \
+        --env PYTHONPATH="$PYPKGS" \
+        --env PYTHONNOUSERSITE=1 \
+        --env HF_HOME="$HF_CACHE" \
+        "$SIF" \
+        python evaluate.py \
+            --base_model              "$BASE_MODEL" \
+            --adapter_type            "$METHOD_LOWER" \
+            --rank                    "$RANK" \
+            --alpha                   "$ALPHA" \
+            --dropout                 "$DROPOUT" \
+            --checkpoint              "$CHECKPOINT" \
+            --dataset                 math_hard \
+            --num_samples_per_problem 1 \
+            --temperature             0 \
+            --batch_size              4 \
+            --max_new_tokens          1024 \
+            --output_jsonl            "${OUT_DIR}/math_hard_pass1.jsonl"
+
+    python3 - <<'PYEOF'
+import json, os
+out_dir = os.environ["OUT_DIR_PY"]
+with open(f"{out_dir}/math_hard_pass1.jsonl") as fh:
+    records = [json.loads(l) for l in fh]
+n_correct = sum(1 for r in records if r.get("n_correct", 0) > 0)
+n_total = len(records)
+pct = round(100.0 * n_correct / n_total, 2) if n_total > 0 else 0.0
+with open(f"{out_dir}/math_hard_pass1.json", "w") as fh:
+    json.dump({"n_correct": n_correct, "n_total": n_total, "pass1": pct}, fh)
+print(f"[MATH-Hard (Level 5) pass@1] {n_correct}/{n_total} = {pct}%")
+PYEOF
+else
+    echo "[SKIP] math_hard_pass1.json already exists"
+fi
+
+# ── 5. cell_metadata.json ─────────────────────────────────────────────────────
 END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 LOG_FILE="${RESULTS_DIR}/${METHOD}/${METHOD}_log.json"

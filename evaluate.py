@@ -108,7 +108,7 @@ def parse_args() -> argparse.Namespace:
 
     # -- Dataset --
     p.add_argument(
-        "--dataset", choices=["gsm8k", "mathinstruct", "math", "math500"], default="gsm8k",
+        "--dataset", choices=["gsm8k", "mathinstruct", "math", "math500", "math_hard"], default="gsm8k",
         help=(
             "Benchmark to evaluate on. "
             "'math' = DigitalLearningGmbH/MATH-lighteval (5000 test problems, "
@@ -116,7 +116,10 @@ def parse_args() -> argparse.Namespace:
             "'math500' = HuggingFaceH4/MATH-500 (community-standard 500-problem "
             "subset, 'Question:/Answer:' prompt -- aligned with MathInstruct "
             "training format, breaks paper Table 1 comparability by design). "
-            "Recommend --max_new_tokens 1024 for both."
+            "'math_hard' = MATH-lighteval test filtered to level=='Level 5' "
+            "(~1324 hardest-tier Hendrycks MATH problems, 'Question:/Answer:' "
+            "prompt -- harder difficulty point between MATH-500 and AMC/AIME). "
+            "Recommend --max_new_tokens 1024 for math/math500/math_hard."
         ),
     )
     p.add_argument(
@@ -269,6 +272,22 @@ def load_eval_dataset(args: argparse.Namespace) -> List[Dict]:
             {
                 "prompt":   f"Question: {s['problem']}\nAnswer:",
                 "gold_raw": s["answer"],
+            }
+            for s in ds
+        ]
+
+    elif args.dataset == "math_hard":
+        # MATH-lighteval test set filtered to Level 5 (hardest tier of Hendrycks
+        # MATH). ~1324 problems, harder than MATH-500 average, easier than AIME.
+        # Uses Q/A prompt to align with training. Gold answer extracted from
+        # solution via extract_boxed downstream (MATH-lighteval has no separate
+        # 'answer' field, only 'solution' with \boxed{} inside).
+        ds = load_dataset("DigitalLearningGmbH/MATH-lighteval", split="test")
+        ds = ds.filter(lambda s: s.get("level") == "Level 5")
+        samples = [
+            {
+                "prompt":   f"Question: {s['problem']}\nAnswer:",
+                "gold_raw": s["solution"],
             }
             for s in ds
         ]
@@ -450,13 +469,14 @@ def run_evaluation(
         gen_tokens = out_ids[:, prompt_len:]
         generated  = tokenizer.batch_decode(gen_tokens, skip_special_tokens=True)
 
-        is_math_comp = args.dataset in ("math", "math500")
+        is_math_comp = args.dataset in ("math", "math500", "math_hard")
         _normalize   = normalize_latex if is_math_comp else normalize
 
         for prob_idx, (prompt, gold_raw) in enumerate(zip(prompts, golds_raw)):
             gens_for_prob = generated[prob_idx * n_per_prob : (prob_idx + 1) * n_per_prob]
 
-            if args.dataset == "math":
+            if args.dataset in ("math", "math_hard"):
+                # MATH-lighteval solutions embed the gold answer in \boxed{...}.
                 extracted_gold = extract_boxed(gold_raw)
             elif args.dataset == "math500":
                 # HuggingFaceH4/MATH-500 'answer' field is already the extracted
