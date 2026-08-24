@@ -11,23 +11,29 @@
 #   #SBATCH -A YOUR_ACCOUNT
 
 # Usage:
-#   sbatch slurm/run_train.sh MODEL_TYPE RANK LR DROPOUT DATASET [EPOCHS] [BASE_MODEL] [ALPHA]
+#   sbatch slurm/run_train.sh MODEL_TYPE RANK LR DROPOUT DATASET \
+#       [EPOCHS] [BASE_MODEL] [ALPHA] [TARGET_MODULES] [SEED]
 #
 # Arguments:
-#   MODEL_TYPE  CeRA | LoRA | DoRA
-#   RANK        adapter rank (e.g. 64, 128, 512)
-#   LR          learning rate (e.g. 5e-4), or "best" to use the sweep-selected optimum
-#   DROPOUT     dropout rate (e.g. 0.1 for CeRA, 0.0 for LoRA/DoRA)
-#   DATASET     math | code | orca
-#   EPOCHS      number of training epochs (default: 3)
-#   BASE_MODEL  HuggingFace model ID (default: meta-llama/Llama-3.1-8B)
-#   ALPHA       LoRA/DoRA alpha; effective scale = alpha / rank (default: 32).
-#               Ignored by CeRA. Pass alpha=rank for the scale-matched (s=1) control.
+#   MODEL_TYPE      CeRA | LoRA | DoRA
+#   RANK            adapter rank (e.g. 64, 128, 512)
+#   LR              learning rate (e.g. 5e-4), or "best" to use the sweep-selected optimum
+#   DROPOUT         dropout rate (e.g. 0.1 for CeRA, 0.0 for LoRA/DoRA)
+#   DATASET         math | metamathqa | code | orca
+#   EPOCHS          number of training epochs (default: 3)
+#   BASE_MODEL      HuggingFace model ID (default: meta-llama/Llama-3.1-8B)
+#   ALPHA           LoRA/DoRA alpha; effective scale = alpha / rank (default: 32).
+#                   Ignored by CeRA. Pass alpha=rank for the scale-matched (s=1) control.
+#   TARGET_MODULES  Comma-separated attention projections (default: q_proj,v_proj).
+#                   Pass "all_linear" as shorthand for all 7 linear projections.
+#   SEED            Global random seed (default: 42)
 #
 # Example:
 #   sbatch slurm/run_train.sh CeRA 128 best 0.1 math 3
 #   sbatch slurm/run_train.sh LoRA 128 5e-4 0.0 math 3 meta-llama/Llama-3.2-3B
 #   sbatch slurm/run_train.sh LoRA 128 5e-4 0.0 math 3 meta-llama/Llama-3.1-8B 128   # scale-matched
+#   # Phase 2: MetaMathQA-40K, all-linear, r=64, α=64, lr=3e-4, seed=42
+#   sbatch slurm/run_train.sh LoRA 64 3e-4 0.0 metamathqa 3 meta-llama/Llama-3.1-8B 64 all_linear 42
 
 MODEL_TYPE=${1:-CeRA}
 RANK=${2:-128}
@@ -37,6 +43,13 @@ DATASET=${5:-math}
 EPOCHS=${6:-3}
 BASE_MODEL=${7:-meta-llama/Llama-3.1-8B}
 ALPHA=${8:-32}
+TARGET_MODULES=${9:-q_proj,v_proj}
+SEED=${10:-42}
+
+# Expand "all_linear" shorthand
+if [ "$TARGET_MODULES" = "all_linear" ]; then
+    TARGET_MODULES="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+fi
 
 MODEL_TAG=$(echo "$BASE_MODEL" | sed 's|.*/||')
 
@@ -91,7 +104,7 @@ mkdir -p "$HF_CACHE"
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
-echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL}"
+echo "[START] Job ID: ${SLURM_JOB_ID:-local} | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL} targets=${TARGET_MODULES} seed=${SEED}"
 
 singularity exec --nv -B /work \
     --env PYTHONPATH="$PYPKGS" \
@@ -99,13 +112,15 @@ singularity exec --nv -B /work \
     --env HF_HOME="$HF_CACHE" \
     "$SIF" \
     python train.py \
-        --model_type  "$MODEL_TYPE" \
-        --rank        "$RANK" \
-        --lr          "$LR" \
-        --dropout     "$DROPOUT" \
-        --dataset     "$DATASET" \
-        --epochs      "$EPOCHS" \
-        --base_model  "$BASE_MODEL" \
-        --alpha       "$ALPHA"
+        --model_type      "$MODEL_TYPE" \
+        --rank            "$RANK" \
+        --lr              "$LR" \
+        --dropout         "$DROPOUT" \
+        --dataset         "$DATASET" \
+        --epochs          "$EPOCHS" \
+        --base_model      "$BASE_MODEL" \
+        --alpha           "$ALPHA" \
+        --target_modules  "$TARGET_MODULES" \
+        --seed            "$SEED"
 
 echo "[END] Finished at $(date)"
