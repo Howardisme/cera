@@ -98,7 +98,7 @@ def parse_args() -> argparse.Namespace:
 
     # -- Training -------------------------------------------------------------
     p.add_argument(
-        "--dataset", choices=["math", "code", "orca"], default="math",
+        "--dataset", choices=["math", "metamathqa", "code", "orca"], default="math",
         help="Target fine-tuning dataset.",
     )
     p.add_argument(

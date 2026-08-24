@@ -3,9 +3,10 @@ Dataset loading and tokenization utilities for CeRA experiments.
 
 Supported task datasets
 -----------------------
-  math  : TIGER-Lab/MathInstruct        (instruction-following, math reasoning)
-  code  : sahil2801/CodeAlpaca-20k      (code generation)
-  orca  : Open-Orca/SlimOrca            (multi-turn chat / reasoning)
+  math        : TIGER-Lab/MathInstruct        (instruction-following, math reasoning)
+  metamathqa  : meta-math/MetaMathQA          (math reasoning, GSM8K/MATH bootstrapped)
+  code        : sahil2801/CodeAlpaca-20k      (code generation)
+  orca        : Open-Orca/SlimOrca            (multi-turn chat / reasoning)
 
 Forgetting dataset
 ------------------
@@ -21,13 +22,16 @@ from datasets import load_dataset
 from transformers import PreTrainedTokenizer
 
 
-MAX_SEQ_LEN   = 512
-MATH_TRAIN_N  = 100_000
-MATH_TEST_OFF = 100_000
-ORCA_TRAIN_N  = 100_000
-ORCA_TEST_OFF = 100_000
-WIKI_TRAIN_N  = 1_000
-WIKI_TEST_N   = 500
+MAX_SEQ_LEN       = 512
+MATH_TRAIN_N      = 100_000
+MATH_TEST_OFF     = 100_000
+METAMATH_TRAIN_N  = 40_000
+METAMATH_TEST_OFF = 40_000
+METAMATH_TEST_N   = 2_000
+ORCA_TRAIN_N      = 100_000
+ORCA_TEST_OFF     = 100_000
+WIKI_TRAIN_N      = 1_000
+WIKI_TEST_N       = 500
 
 
 # ------------------------------------------------------------------------------
@@ -38,6 +42,13 @@ def fmt_math(sample: Dict[str, Any], eos: str) -> str:
     return (
         f"Question: {sample.get('instruction', '')}\n"
         f"Answer: {sample.get('output', '')}{eos}"
+    )
+
+
+def fmt_metamathqa(sample: Dict[str, Any], eos: str) -> str:
+    return (
+        f"Question: {sample.get('query', '')}\n"
+        f"Answer: {sample.get('response', '')}{eos}"
     )
 
 
@@ -88,9 +99,10 @@ def load_task_dataset(
     Download, format, and tokenize a task-specific fine-tuning dataset.
 
     Args:
-        dataset_name:     'math' | 'code' | 'orca'
+        dataset_name:     'math' | 'metamathqa' | 'code' | 'orca'
         tokenizer:        HuggingFace tokenizer with pad_token set.
-        max_train_samples: Cap on training set size (default 100 k).
+        max_train_samples: Cap on training set size (default 100 k). Note that
+                          MetaMathQA defaults to 40 k unless the caller raises this.
 
     Returns:
         (ids_train, ids_test) -- padded token-ID tensors.
@@ -105,6 +117,17 @@ def load_task_dataset(
         train_raw = rows[:max_train_samples]
         test_raw  = rows[MATH_TEST_OFF:]
         fmt = lambda x: fmt_math(x, eos)
+        del ds
+
+    elif dataset_name == "metamathqa":
+        print("[DATA] Loading MetaMathQA (math reasoning)...")
+        ds = load_dataset("meta-math/MetaMathQA", split="train")
+        train_cap = min(max_train_samples, METAMATH_TRAIN_N)
+        n_needed = min(METAMATH_TEST_OFF + METAMATH_TEST_N, len(ds))
+        rows = list(ds.select(range(n_needed)))
+        train_raw = rows[:train_cap]
+        test_raw  = rows[METAMATH_TEST_OFF:]
+        fmt = lambda x: fmt_metamathqa(x, eos)
         del ds
 
     elif dataset_name == "code":
@@ -129,7 +152,7 @@ def load_task_dataset(
 
     else:
         raise ValueError(
-            f"Unknown dataset {dataset_name!r}. Choose from 'math', 'code', 'orca'."
+            f"Unknown dataset {dataset_name!r}. Choose from 'math', 'metamathqa', 'code', 'orca'."
         )
 
     gc.collect()
