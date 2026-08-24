@@ -10,10 +10,15 @@
 # NOTE: Add your cluster account line here, e.g.:
 #   #SBATCH -A YOUR_ACCOUNT
 
-# Run all 3 evaluations (MATH pass@1, MATH pass@10, GSM8K pass@1) for one cell.
+# Run all 4 evaluations (MATH pass@1, MATH pass@10, GSM8K pass@1, MATH-Hard pass@1) for one cell.
 #
 # Usage:
-#   sbatch slurm/run_eval.sh CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR] [DATASET] [ALPHA]
+#   sbatch slurm/run_eval.sh CELL_ID METHOD RANK LR DROPOUT \
+#       [BASE_MODEL] [OUTPUT_DIR] [DATASET] [ALPHA] [TARGET_MODULES] [SEED]
+#
+# TARGET_MODULES  (default q_proj,v_proj) MUST match the training-time value.
+#                 Pass "all_linear" as shorthand for all 7 linear projections.
+# SEED            (default 42) Currently informational; propagated to logs.
 #
 # Arguments:
 #   CELL_ID     unique identifier for this eval cell (e.g. r128_cera_lr5e-4)
@@ -53,9 +58,16 @@ BASE_MODEL=${6:-meta-llama/Llama-3.1-8B}
 OUTPUT_DIR=${7:-results/eval_outputs}
 DATASET=${8:-math}   # training dataset tag used to locate the checkpoint dir
 ALPHA=${9:-32}
+TARGET_MODULES=${10:-q_proj,v_proj}
+SEED=${11:-42}
+
+# Expand "all_linear" shorthand — MUST match the training-time value
+if [ "$TARGET_MODULES" = "all_linear" ]; then
+    TARGET_MODULES="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
+fi
 
 if [ -z "$DROPOUT" ]; then
-    echo "[ERROR] Usage: $0 CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR] [DATASET] [ALPHA]"
+    echo "[ERROR] Usage: $0 CELL_ID METHOD RANK LR DROPOUT [BASE_MODEL] [OUTPUT_DIR] [DATASET] [ALPHA] [TARGET_MODULES] [SEED]"
     exit 1
 fi
 
@@ -188,6 +200,7 @@ if [ ! -f "${OUT_DIR}/math500_pass1.json" ]; then
             --temperature             0 \
             --batch_size              4 \
             --max_new_tokens          1024 \
+            --target_modules          "$TARGET_MODULES" \
             --output_jsonl            "${OUT_DIR}/math500_pass1.jsonl"
 
     python3 - <<'PYEOF'
@@ -227,6 +240,7 @@ if [ ! -f "${OUT_DIR}/math500_pass10.json" ]; then
             --top_p                   0.95 \
             --batch_size              4 \
             --max_new_tokens          1024 \
+            --target_modules          "$TARGET_MODULES" \
             --output_jsonl            "${OUT_DIR}/math500_pass10.jsonl"
 
     python3 - <<'PYEOF'
@@ -279,6 +293,7 @@ if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then
             --temperature             0 \
             --batch_size              4 \
             --max_new_tokens          512 \
+            --target_modules          "$TARGET_MODULES" \
             --output_jsonl            "${OUT_DIR}/gsm8k_pass1.jsonl"
 
     python3 - <<'PYEOF'
@@ -320,6 +335,7 @@ if [ ! -f "${OUT_DIR}/math_hard_pass1.json" ]; then
             --temperature             0 \
             --batch_size              4 \
             --max_new_tokens          1024 \
+            --target_modules          "$TARGET_MODULES" \
             --output_jsonl            "${OUT_DIR}/math_hard_pass1.jsonl"
 
     python3 - <<'PYEOF'
