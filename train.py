@@ -22,12 +22,14 @@ import argparse
 import datetime
 import gc
 import os
+import random
 import re
 import sys
 
+import numpy as np
 import torch
 from dotenv import load_dotenv
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, set_seed as hf_set_seed
 
 from cera.adapters import apply_cera, apply_lora, apply_dora
 from cera.data import load_task_dataset, load_forgetting_dataset
@@ -49,6 +51,19 @@ DEVICE           = "cuda"
 DTYPE            = torch.bfloat16
 BATCH_SIZE       = 4
 GRAD_ACCUM_STEPS = 16            # Effective batch size = 4 * 16 = 64
+DEFAULT_SEED     = 42
+
+
+# ------------------------------------------------------------------------------
+# Reproducibility
+# ------------------------------------------------------------------------------
+
+def set_seed(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    hf_set_seed(seed)
 
 
 # ------------------------------------------------------------------------------
@@ -109,6 +124,10 @@ def parse_args() -> argparse.Namespace:
         "--lr", type=float, default=5e-4,
         help="AdamW learning rate.",
     )
+    p.add_argument(
+        "--seed", type=int, default=DEFAULT_SEED,
+        help="Global random seed (Python / NumPy / torch / HF).",
+    )
 
     return p.parse_args()
 
@@ -133,6 +152,8 @@ def main():
     os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "0"
     os.environ["HF_HUB_DOWNLOAD_TIMEOUT"]   = "120"
 
+    set_seed(args.seed)
+
     target_modules = [t.strip() for t in args.target_modules.split(",")]
     invalid = [m for m in target_modules if m not in _VALID_TARGET_MODULES]
     if invalid:
@@ -154,10 +175,14 @@ def main():
         if args.model_type in ("LoRA", "DoRA") and args.alpha != 32
         else ""
     )
+    # Non-default seeds get a `_S{seed}` suffix so multi-seed runs (e.g. 1337,
+    # 2024) do not collide, while default-seed (42) runs stay un-suffixed for
+    # backward compatibility with existing checkpoints and glob patterns.
+    seed_suffix = f"_S{args.seed}" if args.seed != DEFAULT_SEED else ""
     exp_name  = (
         f"Exp_{args.model_type}_{args.dataset}"
         f"_R{args.rank}_lr{args.lr}_{args.act_fn}_{tgt_str}"
-        f"_D{args.dropout}_E{args.epochs}{alpha_suffix}{model_suffix}_{timestamp}"
+        f"_D{args.dropout}_E{args.epochs}{alpha_suffix}{seed_suffix}{model_suffix}_{timestamp}"
     )
     base_save = os.path.join(WORK_DIR, "results", exp_name)
     results_root = os.path.realpath(os.path.join(WORK_DIR, "results"))
@@ -178,7 +203,8 @@ def main():
     print(
         f"[INFO] Config: model={args.model_type} | dataset={args.dataset} | "
         f"rank={args.rank} | lr={args.lr} | dropout={args.dropout} | "
-        f"act_fn={args.act_fn} | targets={target_modules} | epochs={args.epochs}"
+        f"act_fn={args.act_fn} | targets={target_modules} | epochs={args.epochs} | "
+        f"seed={args.seed}"
     )
 
     # -- Tokenizer ------------------------------------------------------------
@@ -252,6 +278,7 @@ def main():
         "epochs":         args.epochs,
         "grad_accum":     GRAD_ACCUM_STEPS,
         "batch_size":     BATCH_SIZE,
+        "seed":           args.seed,
     }
 
     # -- Run ------------------------------------------------------------------
