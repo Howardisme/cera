@@ -234,6 +234,10 @@ def run_experiment(
     ckpt_map = {size: size // batch_size for size in checkpoint_sizes}
     ckpt_map[full_data * epochs] = max_steps                       # always ckpt at end
     ckpt_map = {k: v for k, v in ckpt_map.items() if v <= max_steps}
+
+    # Epoch-end steps (checkpoints saved without eval, for mechanism analysis)
+    epoch_end_steps = set(steps_per * e for e in range(1, epochs + 1))
+
     check_steps = sorted(set(ckpt_map.values()))
 
     # Summary
@@ -305,13 +309,22 @@ def run_experiment(
                     f"loss {loss.item() * grad_accum_steps:.4f}"
                 )
 
+            # Epoch-end checkpoint (save weights only, no eval)
+            if step in epoch_end_steps and step != max_steps:
+                epoch_num = step // steps_per
+                epoch_fname = f"{model_type.lower()}_ckpt_epoch{epoch_num}_{step}.pt"
+                epoch_metrics = {"step": step, "data_seen": step * batch_size}
+                save_checkpoint(model, step, step * batch_size, epoch_metrics,
+                                save_dir, model_type, filename=epoch_fname)
+
             if step in check_steps:
                 # Flush any partial accumulation
                 if step % grad_accum_steps != 0:
                     optimizer.step()
                     optimizer.zero_grad()
 
-                data_seen = [k for k, v in ckpt_map.items() if v == step][0]
+                matching = [k for k, v in ckpt_map.items() if v == step]
+                data_seen = matching[0] if matching else step * batch_size
                 avg_tr    = running_loss / step_cnt
                 running_loss, step_cnt = 0.0, 0
 
