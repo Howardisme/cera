@@ -127,6 +127,7 @@ fi
 # Convert LR to decimal directory format
 case "$LR" in
   "1e-4") LR_DECIMAL="0.0001" ;;
+  "2e-4") LR_DECIMAL="0.0002" ;;
   "3e-4") LR_DECIMAL="0.0003" ;;
   "5e-4") LR_DECIMAL="0.0005" ;;
   "1e-3") LR_DECIMAL="0.001"  ;;
