@@ -171,6 +171,14 @@ if [ -z "$CHECKPOINT" ]; then
     exit 1
 fi
 
+# Decode-time repetition penalty (env var; 1.0 = off / old behaviour).
+# When != 1.0, results go to a suffixed cell dir so they don't overwrite old runs.
+REP_PENALTY=${REP_PENALTY:-1.0}
+if [ "$REP_PENALTY" != "1.0" ]; then
+    CELL_ID="${CELL_ID}_rp${REP_PENALTY}"
+    echo "[INFO] repetition_penalty=${REP_PENALTY} -> cell=${CELL_ID}"
+fi
+
 OUT_DIR="${OUTPUT_DIR}/${CELL_ID}"
 export OUT_DIR_PY="$OUT_DIR"
 mkdir -p "$OUT_DIR"
@@ -202,6 +210,7 @@ if [ ! -f "${OUT_DIR}/math500_pass1.json" ]; then
             --batch_size              4 \
             --max_new_tokens          1024 \
             --target_modules          "$TARGET_MODULES" \
+            --repetition_penalty      "$REP_PENALTY" \
             --output_jsonl            "${OUT_DIR}/math500_pass1.jsonl"
 
     python3 - <<'PYEOF'
@@ -242,6 +251,7 @@ if [ ! -f "${OUT_DIR}/math500_pass10.json" ]; then
             --batch_size              4 \
             --max_new_tokens          1024 \
             --target_modules          "$TARGET_MODULES" \
+            --repetition_penalty      "$REP_PENALTY" \
             --output_jsonl            "${OUT_DIR}/math500_pass10.jsonl"
 
     python3 - <<'PYEOF'
@@ -295,6 +305,7 @@ if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then
             --batch_size              4 \
             --max_new_tokens          512 \
             --target_modules          "$TARGET_MODULES" \
+            --repetition_penalty      "$REP_PENALTY" \
             --output_jsonl            "${OUT_DIR}/gsm8k_pass1.jsonl"
 
     python3 - <<'PYEOF'
@@ -337,6 +348,7 @@ if [ ! -f "${OUT_DIR}/math_hard_pass1.json" ]; then
             --batch_size              4 \
             --max_new_tokens          1024 \
             --target_modules          "$TARGET_MODULES" \
+            --repetition_penalty      "$REP_PENALTY" \
             --output_jsonl            "${OUT_DIR}/math_hard_pass1.jsonl"
 
     python3 - <<'PYEOF'

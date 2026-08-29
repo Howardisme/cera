@@ -149,6 +149,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch_size",     type=int, default=4,
                    help="Number of problems per batch.")
     p.add_argument("--max_new_tokens", type=int, default=512)
+    p.add_argument("--repetition_penalty", type=float, default=1.0,
+                   help="Decode-time repetition penalty (1.0 = off). Use ~1.15 to "
+                        "suppress greedy repetition-collapse.")
 
     # -- Output --
     p.add_argument(
@@ -464,6 +467,8 @@ def run_evaluation(
                 top_p               = args.top_p       if use_sampling else 1.0,
                 num_return_sequences= n_per_prob,
                 pad_token_id        = tokenizer.eos_token_id,
+                eos_token_id        = tokenizer.eos_token_id,
+                repetition_penalty  = args.repetition_penalty,
             )
 
         gen_tokens = out_ids[:, prompt_len:]
