@@ -159,6 +159,12 @@ if [ "$METHOD" != "CeRA" ]; then
         CANDIDATES=$(echo "$CANDIDATES" | grep "_A${ALPHA}")
     fi
 fi
+# Seed filter: train.py appends _S{seed} for non-default seeds; seed 42 has none.
+if [ "$SEED" = "42" ]; then
+    CANDIDATES=$(echo "$CANDIDATES" | grep -v "_S[0-9]")
+else
+    CANDIDATES=$(echo "$CANDIDATES" | grep "_S${SEED}")
+fi
 RESULTS_DIR=$(echo "$CANDIDATES" | head -1)
 if [ -z "$RESULTS_DIR" ]; then
     echo "[ERROR] No results/ directory found for METHOD=${METHOD} DATASET=${DATASET} RANK=${RANK} LR=${LR_DECIMAL} D=${DROPOUT} A=${ALPHA} MODEL=${MODEL_TAG}"
