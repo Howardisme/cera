@@ -87,7 +87,22 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--checkpoint", required=True,
-        help="Path to adapter checkpoint (.pt file).",
+        help="Path to the adapter checkpoint.  With --adapter_format legacy "
+             "(default) this is a .pt file produced by cera.trainer.save_checkpoint. "
+             "With --adapter_format peft this is the directory containing "
+             "adapter_model.safetensors + adapter_config.json produced by "
+             "train_peft.py (e.g. results/.../peft_adapter_best_<step>).",
+    )
+    p.add_argument(
+        "--adapter_format", choices=["legacy", "peft"], default="legacy",
+        help="Checkpoint format.  'legacy' loads a .pt state_dict into a model "
+             "wrapped with cera.adapters.apply_{cera,lora,dora}.  'peft' loads "
+             "a PEFT adapter directory via peft.PeftModel.from_pretrained; the "
+             "adapter architecture is read from adapter_config.json, so --rank / "
+             "--alpha / --target_modules are ignored in that mode (they are still "
+             "accepted for CLI-shape compatibility with legacy runs).  CeRA is "
+             "not supported in 'peft' mode -- train_peft.py's CeRA path also "
+             "produces legacy .pt files.",
     )
     p.add_argument(
         "--alpha", type=int, default=32,
@@ -173,6 +188,12 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
         print(f"[ERROR] Unknown target_modules: {invalid}. Allowed: {sorted(_VALID_TARGET_MODULES)}")
         sys.exit(1)
 
+    if args.adapter_format == "peft" and args.adapter_type == "cera":
+        print("[ERROR] adapter_format='peft' is only valid for LoRA / DoRA. "
+              "CeRA checkpoints are always legacy .pt (train_peft.py routes "
+              "CeRA through cera.adapters.apply_cera, not through PEFT).")
+        sys.exit(1)
+
     print("[INFO] Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, token=hf_token)
     tokenizer.pad_token    = tokenizer.eos_token
@@ -194,39 +215,54 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
     atten_dim = model.config.hidden_size
     print(f"[INFO] atten_dim={atten_dim} (from model.config.hidden_size)")
 
-    print(f"[INFO] Injecting {args.adapter_type.upper()} adapter (rank={args.rank})...")
-    if args.adapter_type == "cera":
-        model = apply_cera(
-            model,
-            expansion_factor = args.rank / atten_dim,
-            dropout          = args.dropout,
-            act_fn           = args.act_fn,
-            target_modules   = target_modules,
-        )
-    elif args.adapter_type == "dora":
-        model = apply_dora(
-            model,
-            rank           = args.rank,
-            alpha          = args.alpha,
-            target_modules = target_modules,
-        )
-    else:  # lora
-        model = apply_lora(
-            model,
-            rank           = args.rank,
-            alpha          = args.alpha,
-            dropout        = args.dropout,
-            target_modules = target_modules,
-        )
+    if args.adapter_format == "peft":
+        # PEFT-managed adapter: architecture is read from adapter_config.json,
+        # so --rank / --alpha / --target_modules from the CLI are ignored here.
+        from peft import PeftModel
 
-    print(f"[INFO] Loading checkpoint: {args.checkpoint}")
-    ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-    result = model.load_state_dict(ckpt["model_state_dict"], strict=False)
-    print(
-        f"[INFO] Checkpoint loaded."
-        f" Missing keys: {len(result.missing_keys)}"
-        f" | Unexpected keys: {len(result.unexpected_keys)}"
-    )
+        if not os.path.isdir(args.checkpoint):
+            print(f"[ERROR] --adapter_format peft expects a directory containing "
+                  f"adapter_model.safetensors + adapter_config.json, got: {args.checkpoint}")
+            sys.exit(1)
+
+        print(f"[INFO] Loading PEFT adapter directory: {args.checkpoint}")
+        model = PeftModel.from_pretrained(model, args.checkpoint, is_trainable=False)
+        print(f"[INFO] PEFT adapter loaded (config from adapter_config.json).")
+
+    else:
+        print(f"[INFO] Injecting {args.adapter_type.upper()} adapter (rank={args.rank})...")
+        if args.adapter_type == "cera":
+            model = apply_cera(
+                model,
+                expansion_factor = args.rank / atten_dim,
+                dropout          = args.dropout,
+                act_fn           = args.act_fn,
+                target_modules   = target_modules,
+            )
+        elif args.adapter_type == "dora":
+            model = apply_dora(
+                model,
+                rank           = args.rank,
+                alpha          = args.alpha,
+                target_modules = target_modules,
+            )
+        else:  # lora
+            model = apply_lora(
+                model,
+                rank           = args.rank,
+                alpha          = args.alpha,
+                dropout        = args.dropout,
+                target_modules = target_modules,
+            )
+
+        print(f"[INFO] Loading checkpoint: {args.checkpoint}")
+        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+        result = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+        print(
+            f"[INFO] Checkpoint loaded."
+            f" Missing keys: {len(result.missing_keys)}"
+            f" | Unexpected keys: {len(result.unexpected_keys)}"
+        )
 
     model.eval()
     return model, tokenizer
