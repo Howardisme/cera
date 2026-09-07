@@ -576,9 +576,24 @@ def main():
         packing                      = False,
     )
 
+    # Compute the response-template token IDs in-context and pass IDs (not the
+    # raw string) to the collator.  Passing a string forces the collator to
+    # tokenise the template in isolation, but Llama-3's BPE merges the leading
+    # newline with the preceding text when the template appears in context, so
+    # the isolated tokenisation never matches and every instance gets dropped
+    # with the loss-nan symptom.  Tokenising in a dummy context that ends with
+    # the template, then slicing off the prefix, yields the exact token IDs
+    # that will appear in real sequences.
     response_template = _response_template_for(args.dataset)
+    dummy_prefix      = "Question: dummy question."
+    prefix_ids        = tokenizer(dummy_prefix, add_special_tokens=False).input_ids
+    full_ids          = tokenizer(dummy_prefix + response_template,
+                                  add_special_tokens=False).input_ids
+    response_template_ids = full_ids[len(prefix_ids):]
+    print(f"[INFO] Response template '{response_template!r}' -> ids {response_template_ids}")
+
     collator = DataCollatorForCompletionOnlyLM(
-        response_template = response_template,
+        response_template = response_template_ids,
         tokenizer         = tokenizer,
     )
 
