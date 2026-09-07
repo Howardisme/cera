@@ -574,7 +574,6 @@ def main():
         dataset_text_field           = "text",
         max_seq_length               = MAX_SEQ_LEN,
         packing                      = False,
-        remove_unused_columns        = False,
     )
 
     response_template = _response_template_for(args.dataset)
