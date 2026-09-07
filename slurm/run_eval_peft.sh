@@ -1,12 +1,12 @@
 #!/bin/bash
 #SBATCH --job-name=cera_eval_peft
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gpus-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --time=24:00:00
 #SBATCH --output=slurm_logs/eval_peft_%j.log
 #SBATCH --error=slurm_logs/eval_peft_err_%j.log
-#SBATCH --partition=8gpus
+#SBATCH --partition=normal
 
 # Companion to slurm/run_eval.sh -- evaluates a checkpoint produced by
 # train_peft.py, which stores the adapter in PEFT native format
