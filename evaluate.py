@@ -593,9 +593,16 @@ def print_summary(records: List[Dict], args: argparse.Namespace):
 def main():
     args = parse_args()
 
-    if not os.path.isfile(args.checkpoint):
-        print(f"[ERROR] Checkpoint file not found: {args.checkpoint}")
-        sys.exit(1)
+    # Legacy .pt is a file; PEFT adapter is a directory containing
+    # adapter_model.safetensors + adapter_config.json.
+    if args.adapter_format == "peft":
+        if not os.path.isdir(args.checkpoint):
+            print(f"[ERROR] --adapter_format peft expects a directory, got: {args.checkpoint}")
+            sys.exit(1)
+    else:
+        if not os.path.isfile(args.checkpoint):
+            print(f"[ERROR] Checkpoint file not found: {args.checkpoint}")
+            sys.exit(1)
 
     load_dotenv()
     hf_token = os.getenv("HF_TOKEN")
