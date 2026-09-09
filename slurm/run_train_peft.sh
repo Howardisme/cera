@@ -15,10 +15,16 @@
 #   sbatch slurm/run_train_peft.sh MODEL_TYPE RANK LR DROPOUT DATASET \
 #       [EPOCHS] [BASE_MODEL] [ALPHA] [TARGET_MODULES] [SEED] [ATTN_IMPL]
 
+set -e
+
 MODEL_TYPE=${1:-LoRA}
 RANK=${2:-64}
 LR=${3:-1e-4}
-DROPOUT=${4:-0.0}
+if [ "$MODEL_TYPE" = "CeRA" ]; then
+    DROPOUT=${4:-0.1}
+else
+    DROPOUT=${4:-0.0}
+fi
 DATASET=${5:-metamathqa}
 EPOCHS=${6:-3}
 BASE_MODEL=${7:-meta-llama/Llama-3.1-8B}
@@ -26,6 +32,10 @@ ALPHA=${8:-64}
 TARGET_MODULES=${9:-all_linear}
 SEED=${10:-42}
 ATTN_IMPL=${11:-sdpa}
+MAX_STEPS=${MAX_STEPS:--1}
+MAX_TRAIN_SAMPLES=${MAX_TRAIN_SAMPLES:-100000}
+EVAL_BATCHES=${EVAL_BATCHES:-200}
+ACT_FN=${ACT_FN:-silu}
 
 if [ "$TARGET_MODULES" = "all_linear" ]; then
     TARGET_MODULES="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
@@ -60,6 +70,10 @@ singularity exec --nv -B /work \
         --alpha           "$ALPHA" \
         --target_modules  "$TARGET_MODULES" \
         --seed            "$SEED" \
-        --attn_impl       "$ATTN_IMPL"
+        --attn_impl       "$ATTN_IMPL" \
+        --act_fn          "$ACT_FN" \
+        --max_steps       "$MAX_STEPS" \
+        --max_train_samples "$MAX_TRAIN_SAMPLES" \
+        --eval_batches    "$EVAL_BATCHES"
 
 echo "[END] Finished at $(date)"

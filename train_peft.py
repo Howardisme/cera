@@ -37,9 +37,8 @@ Output compatibility
     LoRA / DoRA runs produced by this script.  A legacy .pt containing the
     raw trainable parameters is also written for CeRA runs (which do not
     go through PEFT), matching cera.trainer.save_checkpoint exactly.
-  * evaluate.py currently loads legacy .pt via apply_lora / apply_dora and
-    strict=False; loading a PEFT-format adapter requires an additional code
-    path (peft.PeftModel.from_pretrained).  This is out of scope here.
+    * evaluate.py loads PEFT adapters natively and reconstructs new CeRA .pt
+        checkpoints using their fixed-rank architecture metadata.
 
 Added dependencies (append to requirements.txt): peft>=0.11, trl>=0.11
 """
@@ -47,10 +46,12 @@ Added dependencies (append to requirements.txt): peft>=0.11, trl>=0.11
 import argparse
 import datetime
 import gc
+import importlib.metadata
 import os
 import random
 import re
 import sys
+import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -68,6 +69,9 @@ from peft import LoraConfig, get_peft_model
 from trl import DataCollatorForCompletionOnlyLM, SFTConfig, SFTTrainer
 
 from cera.adapters import apply_cera
+from cera.peft_pipeline import (
+    adapter_manifest, load_cera_weights, peft_adapter_dtype, validate_cera_budget,
+)
 from cera.data import (
     MAX_SEQ_LEN,
     METAMATH_TEST_N,
@@ -181,7 +185,7 @@ def _load_text_dataset(
     else:
         raise ValueError(f"Unknown dataset {dataset_name!r}")
 
-    train_texts = [fmt(x) for x in train_raw]
+    train_texts = [fmt(x) for x in train_raw[:max_train_samples]]
     test_texts  = [fmt(x) for x in test_raw]
     print(f"[DATA] Text-form dataset {dataset_name}: "
           f"{len(train_texts):,} train | {len(test_texts):,} test")
@@ -242,6 +246,7 @@ class ForgettingEvalCallback(TrainerCallback):
         effective_batch: int,
         pad_token_id: int,
         peft_managed: bool,
+        eval_batches: int = 200,
     ):
         self.model            = model
         self.ids_test_target  = ids_test_target
@@ -253,6 +258,7 @@ class ForgettingEvalCallback(TrainerCallback):
         self.effective_batch  = effective_batch
         self.pad_token_id     = pad_token_id
         self.peft_managed     = peft_managed
+        self.eval_batches     = eval_batches
         self._fired: set      = set()
         self._best_val_loss   = float("inf")
         self._best_ckpt_dir: Optional[str] = None
@@ -273,7 +279,7 @@ class ForgettingEvalCallback(TrainerCallback):
             legacy_fname = f"{self.model_type.lower()}_ckpt_{data_seen}.pt"
             save_checkpoint(self.model, step, data_seen, record,
                             self.save_dir, self.model_type,
-                            filename=legacy_fname)
+                            filename=legacy_fname, config=self.log["config"])
             legacy_path = os.path.join(self.save_dir, legacy_fname)
 
         return native_dir, legacy_path
@@ -287,11 +293,11 @@ class ForgettingEvalCallback(TrainerCallback):
         print(f"\n[EVAL] step={step} | data_seen={data_seen:,}")
         lo_te, pp_te = run_eval(
             self.model, self.ids_test_target, BATCH_SIZE, DEVICE,
-            self.pad_token_id,
+            self.pad_token_id, limit_batches=self.eval_batches,
         )
         lo_or, pp_or = run_eval(
             self.model, self.ids_test_orig, BATCH_SIZE, DEVICE,
-            self.pad_token_id,
+            self.pad_token_id, limit_batches=self.eval_batches,
         )
 
         record = {
@@ -333,7 +339,7 @@ class ForgettingEvalCallback(TrainerCallback):
                 best_fname = f"{self.model_type.lower()}_ckpt_best_{step}.pt"
                 save_checkpoint(self.model, step, data_seen, record,
                                 self.save_dir, self.model_type,
-                                filename=best_fname)
+                                filename=best_fname, config=self.log["config"])
                 self._best_ckpt_dir  = None
                 self._best_ckpt_path = os.path.join(self.save_dir, best_fname)
                 print(f"[SAVE] New best val_loss={self._best_val_loss:.4f}")
@@ -346,6 +352,12 @@ class ForgettingEvalCallback(TrainerCallback):
             self._running_steps += 1
 
     def on_step_end(self, args, state, control, **kwargs):
+        if state.global_step == 1 and kwargs.get("optimizer") is not None:
+            optimizer = kwargs["optimizer"]
+            state_dtypes = sorted({str(value.dtype) for values in optimizer.state.values()
+                                   for value in values.values() if isinstance(value, torch.Tensor)})
+            self.log["config"]["optimizer_state_dtypes"] = state_dtypes
+            print(f"[AUDIT] Optimizer state dtypes: {state_dtypes}")
         data_seen = state.global_step * self.effective_batch
         for size in self.checkpoint_sizes:
             if size in self._fired:
@@ -375,7 +387,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--rank",    type=int,   default=64)
     p.add_argument("--alpha",   type=int,   default=64,
                    help="Scale-matched default (alpha == rank).")
-    p.add_argument("--dropout", type=float, default=0.0,
+    p.add_argument("--dropout", type=float, default=None,
                    help="LoRA/DoRA input dropout, or CeRA bottleneck dropout.")
     p.add_argument("--act_fn",  choices=["silu", "relu", "identity"], default="silu",
                    help="CeRA only.")
@@ -395,8 +407,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--attn_impl", choices=["flash_attention_2", "sdpa"], default="sdpa",
                    help="Set to flash_attention_2 if the flash-attn package is installed.")
     p.add_argument("--logging_steps", type=int, default=25)
+    p.add_argument("--max_steps", type=int, default=-1,
+                   help="Positive optimizer-step limit for smoke runs; default uses epochs.")
+    p.add_argument("--max_train_samples", type=int, default=100_000)
+    p.add_argument("--eval_batches", type=int, default=200,
+                   help="Periodic PPL evaluation batch limit; lower only for smoke runs.")
 
-    return p.parse_args()
+    args = p.parse_args()
+    if args.dropout is None:
+        args.dropout = 0.1 if args.model_type == "CeRA" else 0.0
+    if not 1 <= args.max_train_samples <= 100_000 or args.eval_batches < 1:
+        p.error("Require 1 <= max_train_samples <= 100000 and eval_batches >= 1.")
+    if args.max_steps == 0 or args.max_steps < -1 or args.rank < 1:
+        p.error("Require positive rank and max_steps=-1 or a positive step count.")
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -421,7 +445,10 @@ def main():
 
     set_seed(args.seed)
 
+    if args.target_modules == "all_linear":
+        args.target_modules = "q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
     target_modules = [t.strip() for t in args.target_modules.split(",")]
+    args.target_modules = ",".join(target_modules)
     invalid = [m for m in target_modules if m not in _VALID_TARGET_MODULES]
     if invalid:
         print(f"[ERROR] Unknown target_modules: {invalid}. "
@@ -430,7 +457,7 @@ def main():
 
     # -- Output paths ---------------------------------------------------------
     WORK_DIR  = os.path.dirname(os.path.abspath(__file__))
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     tgt_str   = args.target_modules.replace(",", "_")
     model_tag = args.base_model.split("/")[-1]
     model_suffix = f"_{model_tag}" if args.base_model != DEFAULT_MODEL else ""
@@ -445,6 +472,9 @@ def main():
         f"_R{args.rank}_lr{args.lr}_{args.act_fn}_{tgt_str}"
         f"_D{args.dropout}_E{args.epochs}{alpha_suffix}{seed_suffix}{model_suffix}_{timestamp}"
     )
+    smoke_run = args.max_steps > 0 or args.max_train_samples < 100_000 or args.eval_batches < 200
+    if smoke_run:
+        exp_name = exp_name.replace("Exp_PEFT_", "Smoke_PEFT_", 1)
     base_save    = os.path.join(WORK_DIR, "results", exp_name)
     results_root = os.path.realpath(os.path.join(WORK_DIR, "results"))
     if not os.path.realpath(base_save).startswith(results_root + os.sep):
@@ -472,12 +502,12 @@ def main():
     # -- Datasets -------------------------------------------------------------
     # Text form for SFTTrainer training loop.
     train_text_ds, _ = _load_text_dataset(
-        args.dataset, tokenizer, max_train_samples=100_000
+        args.dataset, tokenizer, max_train_samples=args.max_train_samples
     )
     # Pre-tokenised tensors reused for periodic eval (run_eval expects tensors,
     # unchanged from cera.trainer, so log entries stay directly comparable).
     _, ids_test_target = load_task_dataset(
-        args.dataset, tokenizer, max_train_samples=100_000
+        args.dataset, tokenizer, max_train_samples=args.max_train_samples
     )
     _, ids_test_orig = load_forgetting_dataset(tokenizer)
     gc.collect()
@@ -501,15 +531,16 @@ def main():
     # -- Adapter injection ----------------------------------------------------
     peft_managed = args.model_type in ("LoRA", "DoRA")
     if args.model_type == "CeRA":
-        atten_dim = model.config.hidden_size
-        cera_exp  = args.rank / atten_dim
-        print(f"[INFO] atten_dim={atten_dim} | cera_exp={cera_exp:.6f}")
+        adapter_dtype = peft_adapter_dtype(DTYPE)
+        print(f"[AUDIT] Runtime PEFT probe adapter dtype: {adapter_dtype}")
         model = apply_cera(
-            model, cera_exp,
+            model, rank=args.rank, adapter_dtype=adapter_dtype,
             dropout        = args.dropout,
             act_fn         = args.act_fn,
             target_modules = target_modules,
         )
+        count = validate_cera_budget(model, args.rank, len(model.model.layers) * len(target_modules))
+        print(f"[AUDIT] CeRA trainable parameters: {count:,} | scale=1")
     else:
         use_dora = (args.model_type == "DoRA")
         print(f"[INFO] Applying PEFT LoRA | rank={args.rank} | alpha={args.alpha} | "
@@ -546,7 +577,23 @@ def main():
         "attn_impl":      args.attn_impl,
         "response_template": _response_template_for(args.dataset),
         "loss_scope":     "completion_only",
+        "eval_loss_scope": "full_sequence_nonpad",
+        "max_steps": args.max_steps,
+        "max_train_samples": args.max_train_samples,
+        "train_samples": len(train_text_ds),
+        "eval_batches": args.eval_batches,
+        "smoke_run": smoke_run,
+        "base_model_revision": getattr(model.config, "_commit_hash", None),
+        "trainable_parameters": sum(param.numel() for param in model.parameters() if param.requires_grad),
+        "parameter_manifest": adapter_manifest(model),
+        "versions": {name: importlib.metadata.version(name)
+                     for name in ("torch", "transformers", "peft", "trl", "accelerate", "datasets")},
     }
+    if args.model_type == "CeRA":
+        config.update(cera_format_version=1, rank_mode="fixed", scale=1.0,
+                      adapter_dtype=str(adapter_dtype).removeprefix("torch."),
+                      initialization="kaiming_normal_A_zero_B")
+    print(f"[AUDIT] Trainable dtypes: {sorted({entry['dtype'] for entry in config['parameter_manifest'].values()})}")
 
     # -- SFTTrainer -----------------------------------------------------------
     # packing=False is intentional: DataCollatorForCompletionOnlyLM is
@@ -556,6 +603,7 @@ def main():
     sft_cfg = SFTConfig(
         output_dir                   = save_dir,
         num_train_epochs             = args.epochs,
+        max_steps                    = args.max_steps,
         per_device_train_batch_size  = BATCH_SIZE,
         gradient_accumulation_steps  = GRAD_ACCUM_STEPS,
         learning_rate                = args.lr,
@@ -609,6 +657,7 @@ def main():
         effective_batch  = effective_batch,
         pad_token_id     = tokenizer.pad_token_id,
         peft_managed     = peft_managed,
+        eval_batches     = args.eval_batches,
     )
 
     trainer = SFTTrainer(
@@ -619,13 +668,27 @@ def main():
         data_collator   = collator,
         callbacks       = [callback],
     )
+    config["optimizer_config"] = {
+        name: getattr(sft_cfg, name)
+        for name in ("adam_beta1", "adam_beta2", "adam_epsilon", "weight_decay", "max_grad_norm")
+    }
+    config["max_seq_length"] = MAX_SEQ_LEN
+    config["packing"] = False
+    trainer.create_optimizer()
+    trainable_ids = {id(param) for param in model.parameters() if param.requires_grad}
+    optimizer_ids = {id(param) for group in trainer.optimizer.param_groups for param in group["params"]}
+    if optimizer_ids != trainable_ids:
+        raise ValueError("Optimizer parameter set does not match trainable adapter parameters.")
+    sample_batch = collator([trainer.train_dataset[index] for index in range(min(4, len(trainer.train_dataset)))])
+    if (sample_batch["labels"] != -100).sum().item() == 0:
+        raise ValueError("Initial training examples contain no supervised answer tokens.")
 
     # -- Baseline evaluation before any optimizer step ------------------------
     print("\n[STEP 0] Baseline Evaluation...")
     lo_te, pp_te = run_eval(model, ids_test_target, BATCH_SIZE, DEVICE,
-                            tokenizer.pad_token_id)
+                            tokenizer.pad_token_id, limit_batches=args.eval_batches)
     lo_or, pp_or = run_eval(model, ids_test_orig, BATCH_SIZE, DEVICE,
-                            tokenizer.pad_token_id)
+                            tokenizer.pad_token_id, limit_batches=args.eval_batches)
     baseline = {
         "step": 0, "data_seen": 0,
         "new_task_target":   {"train_loss": None, "train_ppl": None,
@@ -637,7 +700,14 @@ def main():
     print(f"  baseline target_ppl={pp_te:.2f} | general_ppl={pp_or:.2f}")
 
     # -- Run ------------------------------------------------------------------
+    started = time.perf_counter()
+    torch.cuda.reset_peak_memory_stats()
     trainer.train()
+    config["training_seconds"] = time.perf_counter() - started
+    config["peak_cuda_memory_bytes"] = torch.cuda.max_memory_allocated()
+    if smoke_run:
+        callback._run_and_log(trainer.state, trainer.state.global_step * effective_batch)
+    save_logs(callback.log, save_dir, args.model_type)
 
     # -- Final checkpoint -----------------------------------------------------
     final_step = trainer.state.global_step
@@ -650,7 +720,18 @@ def main():
     else:
         final_fname = f"{args.model_type.lower()}_ckpt_final_{final_step}.pt"
         save_checkpoint(model, final_step, final_data_seen, final_record,
-                        save_dir, args.model_type, filename=final_fname)
+                        save_dir, args.model_type, filename=final_fname, config=config)
+        if smoke_run:
+            model.eval()
+            probe_ids = ids_test_target[:1, :32].to(DEVICE)
+            with torch.no_grad():
+                before = model(probe_ids).logits.float().cpu()
+            checkpoint = torch.load(os.path.join(save_dir, final_fname), map_location="cpu", weights_only=True)
+            load_cera_weights(model, checkpoint["model_state_dict"])
+            with torch.no_grad():
+                after = model(probe_ids).logits.float().cpu()
+            torch.testing.assert_close(before, after, atol=1e-5, rtol=1e-5)
+            print("[SMOKE] Saved adapter reload logits match.")
 
     print("\n[SUCCESS] Training complete.")
 

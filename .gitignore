@@ -1,12 +1,53 @@
+# Experiment outputs and cluster logs
 results/
 slurm_logs/
-*.pyc
-__pycache__/
-.env
-*.pt
 *.jsonl
+slurm-*.out
+wandb/
+runs/
+
+# Model checkpoints and container images
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+pytorch_model*.bin
+adapter_model.bin
+*.sif
+*.simg
+
+# Local secrets (keep shareable templates)
+.env
+.env.*
+!.env.example
+!.env.template
+
+# Python environments, caches, and build outputs
+__pycache__/
+*.py[cod]
 *.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.cache/
+.coverage
+.coverage.*
+htmlcov/
+build/
+dist/
+hf_cache/
+cera_pypkgs/
+
+# Local reference attachments; Markdown documentation remains versioned
+/cera_extension/*.pdf
+/cera_extension/*.pptx
+/cera_extension/*.png
+
+# OS files and local working notes
 .DS_Store
+._*
 CLAUDE.md
 tmp/
 research_log.md

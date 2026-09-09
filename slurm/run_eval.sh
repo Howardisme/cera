@@ -236,59 +236,62 @@ else
 fi
 
 # ── 2. MATH-500 pass@10 (sampling, n=10, HuggingFaceH4/MATH-500) ──────────────
-if [ ! -f "${OUT_DIR}/math500_pass10.json" ]; then
-    echo "[EVAL 2/3] MATH-500 pass@10 (sampling n=10, 500 problems)..."
-    singularity exec --nv -B /work \
-        --env PYTHONPATH="$PYPKGS" \
-        --env PYTHONNOUSERSITE=1 \
-        --env HF_HOME="$HF_CACHE" \
-        "$SIF" \
-        python evaluate.py \
-            --base_model              "$BASE_MODEL" \
-            --adapter_type            "$METHOD_LOWER" \
-            --rank                    "$RANK" \
-            --alpha                   "$ALPHA" \
-            --dropout                 "$DROPOUT" \
-            --checkpoint              "$CHECKPOINT" \
-            --dataset                 math500 \
-            --num_samples_per_problem 10 \
-            --temperature             0.8 \
-            --top_p                   0.95 \
-            --batch_size              4 \
-            --max_new_tokens          1024 \
-            --target_modules          "$TARGET_MODULES" \
-            --repetition_penalty      "$REP_PENALTY" \
-            --output_jsonl            "${OUT_DIR}/math500_pass10.jsonl"
-
-    python3 - <<'PYEOF'
-import json, os
-from math import comb
-out_dir = os.environ["OUT_DIR_PY"]
-with open(f"{out_dir}/math500_pass10.jsonl") as fh:
-    records = [json.loads(l) for l in fh]
-k = 10
-pass10_list, any_correct_list = [], []
-for r in records:
-    n = r.get("num_samples_per_problem", 10)
-    c = int(r.get("n_correct", 0))
-    if n >= k:
-        denom = comb(n, k)
-        numer = comb(n - c, k) if n - c >= k else 0
-        p = 1.0 - numer / denom if denom > 0 else float(c > 0)
-    else:
-        p = float(c > 0)
-    pass10_list.append(p)
-    any_correct_list.append(float(c > 0))
-n_total = len(records)
-pass10 = round(100.0 * sum(pass10_list) / n_total, 2) if n_total > 0 else 0.0
-any_correct = round(100.0 * sum(any_correct_list) / n_total, 2) if n_total > 0 else 0.0
-with open(f"{out_dir}/math500_pass10.json", "w") as fh:
-    json.dump({"pass10_unbiased": pass10, "any_correct_rate": any_correct, "n_total": n_total}, fh)
-print(f"[MATH-500 pass@10] unbiased={pass10}%  any_correct={any_correct}%")
-PYEOF
-else
-    echo "[SKIP] math500_pass10.json already exists"
-fi
+# Disabled during training-pipeline tuning to save time/GPU.
+# Re-enable by uncommenting the block below.
+# if [ ! -f "${OUT_DIR}/math500_pass10.json" ]; then
+#     echo "[EVAL 2/3] MATH-500 pass@10 (sampling n=10, 500 problems)..."
+#     singularity exec --nv -B /work \
+#         --env PYTHONPATH="$PYPKGS" \
+#         --env PYTHONNOUSERSITE=1 \
+#         --env HF_HOME="$HF_CACHE" \
+#         "$SIF" \
+#         python evaluate.py \
+#             --base_model              "$BASE_MODEL" \
+#             --adapter_type            "$METHOD_LOWER" \
+#             --rank                    "$RANK" \
+#             --alpha                   "$ALPHA" \
+#             --dropout                 "$DROPOUT" \
+#             --checkpoint              "$CHECKPOINT" \
+#             --dataset                 math500 \
+#             --num_samples_per_problem 10 \
+#             --temperature             0.8 \
+#             --top_p                   0.95 \
+#             --batch_size              4 \
+#             --max_new_tokens          1024 \
+#             --target_modules          "$TARGET_MODULES" \
+#             --repetition_penalty      "$REP_PENALTY" \
+#             --output_jsonl            "${OUT_DIR}/math500_pass10.jsonl"
+#
+#     python3 - <<'PYEOF'
+# import json, os
+# from math import comb
+# out_dir = os.environ["OUT_DIR_PY"]
+# with open(f"{out_dir}/math500_pass10.jsonl") as fh:
+#     records = [json.loads(l) for l in fh]
+# k = 10
+# pass10_list, any_correct_list = [], []
+# for r in records:
+#     n = r.get("num_samples_per_problem", 10)
+#     c = int(r.get("n_correct", 0))
+#     if n >= k:
+#         denom = comb(n, k)
+#         numer = comb(n - c, k) if n - c >= k else 0
+#         p = 1.0 - numer / denom if denom > 0 else float(c > 0)
+#     else:
+#         p = float(c > 0)
+#     pass10_list.append(p)
+#     any_correct_list.append(float(c > 0))
+# n_total = len(records)
+# pass10 = round(100.0 * sum(pass10_list) / n_total, 2) if n_total > 0 else 0.0
+# any_correct = round(100.0 * sum(any_correct_list) / n_total, 2) if n_total > 0 else 0.0
+# with open(f"{out_dir}/math500_pass10.json", "w") as fh:
+#     json.dump({"pass10_unbiased": pass10, "any_correct_rate": any_correct, "n_total": n_total}, fh)
+# print(f"[MATH-500 pass@10] unbiased={pass10}%  any_correct={any_correct}%")
+# PYEOF
+# else
+#     echo "[SKIP] math500_pass10.json already exists"
+# fi
+echo "[SKIP 2/3] MATH-500 pass@10 disabled (see comment in slurm/run_eval.sh)"
 
 # ── 3. GSM8K pass@1 (greedy, full 1319 problems) ──────────────────────────────
 if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then

@@ -58,9 +58,12 @@ class CeRAAdapter(nn.Module):
         act_fn: str = "silu",
         device=None,
         dtype=None,
+        rank: Optional[int] = None,
     ):
         super().__init__()
-        hidden_dim = int(input_dim * expansion_factor)
+        hidden_dim = rank if rank is not None else int(input_dim * expansion_factor)
+        if hidden_dim < 1:
+            raise ValueError("CeRA rank must be positive.")
 
         self.A = nn.Linear(input_dim, hidden_dim, bias=False, device=device, dtype=dtype)
 
@@ -101,7 +104,7 @@ class CeRAAdapter(nn.Module):
                                       missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        delta = self.B(self.dropout(self.act_fn(self.A(x))))
+        delta = self.B(self.dropout(self.act_fn(self.A(x.to(self.A.weight.dtype)))))
         if self.track_activation:
             self.last_delta = delta.detach().cpu().float()
         return delta
@@ -125,6 +128,8 @@ class CeRAWrapper(nn.Module):
         expansion_factor: float,
         dropout: float = 0.3,
         act_fn: str = "silu",
+        rank: Optional[int] = None,
+        adapter_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         self.original_layer = original_layer
@@ -138,11 +143,13 @@ class CeRAWrapper(nn.Module):
             dropout=dropout,
             act_fn=act_fn,
             device=original_layer.weight.device,
-            dtype=original_layer.weight.dtype,
+            dtype=adapter_dtype or original_layer.weight.dtype,
+            rank=rank,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.original_layer(x) + self.cera(x)
+        base = self.original_layer(x)
+        return base + self.cera(x).to(base.dtype)
 
 
 # ------------------------------------------------------------------------------
@@ -274,11 +281,14 @@ class DoRAWrapper(nn.Module):
 
 def apply_cera(
     model: nn.Module,
-    expansion_factor: float,
+    expansion_factor: float = 0.5,
     dropout: float = 0.3,
     act_fn: str = "silu",
     target_modules: Optional[List[str]] = None,
     layer_indices: Optional[List[int]] = None,
+    *,
+    rank: Optional[int] = None,
+    adapter_dtype: Optional[torch.dtype] = None,
 ) -> nn.Module:
     """
     Inject CeRA adapters into self-attention projections of a Llama model.
@@ -297,6 +307,40 @@ def apply_cera(
     """
     if target_modules is None:
         target_modules = ["q_proj", "v_proj"]
+
+    if rank is not None:
+        if rank < 1 or not target_modules or len(set(target_modules)) != len(target_modules):
+            raise ValueError("Require positive rank and nonempty, unique target_modules.")
+        if act_fn not in {"silu", "relu", "identity"} or not 0 <= dropout <= 1:
+            raise ValueError("Invalid CeRA activation or dropout.")
+        replacements = []
+        for layer_idx, layer in enumerate(model.model.layers):
+            if layer_indices is not None and layer_idx not in layer_indices:
+                continue
+            matched = set()
+            for group_name in ("self_attn", "mlp"):
+                group = getattr(layer, group_name, None)
+                if group is None:
+                    continue
+                for name, module in list(group.named_children()):
+                    if name not in target_modules:
+                        continue
+                    if type(module) is not nn.Linear:
+                        raise ValueError(f"Unsupported or already adapted layer: {layer_idx}.{group_name}.{name}")
+                    matched.add(name)
+                    replacements.append((group, name, module))
+            missing = set(target_modules) - matched
+            if missing:
+                raise ValueError(f"Layer {layer_idx} has unmatched CeRA targets: {sorted(missing)}")
+        if not replacements:
+            raise ValueError("No CeRA target layers found.")
+        for group, name, module in replacements:
+            setattr(group, name, CeRAWrapper(
+                module, module.in_features, module.out_features, expansion_factor,
+                dropout=dropout, act_fn=act_fn, rank=rank, adapter_dtype=adapter_dtype,
+            ))
+        print(f"[INFO] Applied fixed-rank CeRA | rank={rank} | projections={len(replacements)}")
+        return model
 
     layer_tag = "all" if layer_indices is None else layer_indices
     print(

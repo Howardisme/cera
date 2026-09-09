@@ -76,6 +76,7 @@ def save_checkpoint(
     model_type: str,
     max_retries: int = 3,
     filename: Optional[str] = None,
+    config: Optional[Dict] = None,
 ):
     """
     Save only the adapter's trainable parameters plus experiment metadata.
@@ -99,6 +100,7 @@ def save_checkpoint(
                     "model_type":       model_type,
                     "model_state_dict": state,
                     "metrics":          metrics,
+                    **({"config": config} if config is not None else {}),
                 },
                 path,
             )

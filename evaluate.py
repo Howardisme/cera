@@ -51,6 +51,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from cera.adapters import apply_cera, apply_lora, apply_dora
+from cera.peft_pipeline import restore_cera, validate_cera_config
 
 
 DEFAULT_MODEL         = "meta-llama/Llama-3.1-8B"
@@ -174,7 +175,9 @@ def parse_args() -> argparse.Namespace:
         help="Path for the per-sample JSONL results file.",
     )
 
-    return p.parse_args()
+    args = p.parse_args()
+    args.explicit_options = {argument.split("=", 1)[0] for argument in sys.argv[1:] if argument.startswith("--")}
+    return args
 
 
 # ---------------------------------------------------------------------------
@@ -182,6 +185,25 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 
 def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
+    checkpoint = None
+    revision_kwargs = {}
+    if args.adapter_format == "legacy" and args.adapter_type == "cera":
+        checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+        config = checkpoint.get("config")
+        if config is not None and "cera_format_version" in config:
+            validate_cera_config(config)
+            for field, key in (("base_model", "model"), ("rank", "rank"), ("dropout", "dropout"),
+                               ("act_fn", "act_fn"), ("target_modules", "target_modules")):
+                supplied = getattr(args, field)
+                expected = config[key]
+                if field == "target_modules":
+                    supplied = set(supplied.split(","))
+                    expected = set(expected.split(","))
+                if f"--{field}" in getattr(args, "explicit_options", set()) and supplied != expected:
+                    raise ValueError(f"--{field} conflicts with CeRA checkpoint metadata.")
+                setattr(args, field, config[key])
+            if config.get("base_model_revision"):
+                revision_kwargs["revision"] = config["base_model_revision"]
     target_modules = [t.strip() for t in args.target_modules.split(",")]
     invalid = [m for m in target_modules if m not in _VALID_TARGET_MODULES]
     if invalid:
@@ -195,7 +217,7 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
         sys.exit(1)
 
     print("[INFO] Loading tokenizer...")
-    tokenizer = AutoTokenizer.from_pretrained(args.base_model, token=hf_token)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model, token=hf_token, **revision_kwargs)
     tokenizer.pad_token    = tokenizer.eos_token
     tokenizer.padding_side = "left"   # left-padding required for batched generation
 
@@ -206,6 +228,7 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
         torch_dtype=DTYPE,
         device_map="auto",
         attn_implementation="sdpa",
+        **revision_kwargs,
     )
     model.config.use_cache = True
     for param in model.parameters():
@@ -232,12 +255,9 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
     else:
         print(f"[INFO] Injecting {args.adapter_type.upper()} adapter (rank={args.rank})...")
         if args.adapter_type == "cera":
-            model = apply_cera(
-                model,
-                expansion_factor = args.rank / atten_dim,
-                dropout          = args.dropout,
-                act_fn           = args.act_fn,
-                target_modules   = target_modules,
+            model = restore_cera(
+                model, checkpoint, rank=args.rank, dropout=args.dropout,
+                act_fn=args.act_fn, target_modules=target_modules,
             )
         elif args.adapter_type == "dora":
             model = apply_dora(
@@ -256,13 +276,16 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
             )
 
         print(f"[INFO] Loading checkpoint: {args.checkpoint}")
-        ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
-        result = model.load_state_dict(ckpt["model_state_dict"], strict=False)
-        print(
-            f"[INFO] Checkpoint loaded."
-            f" Missing keys: {len(result.missing_keys)}"
-            f" | Unexpected keys: {len(result.unexpected_keys)}"
-        )
+        if args.adapter_type != "cera":
+            ckpt = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
+            result = model.load_state_dict(ckpt["model_state_dict"], strict=False)
+            print(
+                f"[INFO] Checkpoint loaded."
+                f" Missing keys: {len(result.missing_keys)}"
+                f" | Unexpected keys: {len(result.unexpected_keys)}"
+            )
+        else:
+            print("[INFO] All CeRA adapter weights loaded and validated.")
 
     model.eval()
     return model, tokenizer
