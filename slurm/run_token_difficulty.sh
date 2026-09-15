@@ -15,6 +15,7 @@
 #       RUN_ID LORA_CHECKPOINT CERA_CHECKPOINT \
 #       [DATASET] [NUM_SAMPLES] [RANK] [ALPHA] [DROPOUT] \
 #       [TARGET_MODULES] [BASE_MODEL] [LORA_FORMAT]
+#       [LINEAR_ADAPTER_TYPE] [LINEAR_ACT_FN]
 #
 # DATASET: metamathqa | gsm8k | math500
 # LORA_FORMAT: peft | legacy
@@ -32,6 +33,8 @@ DROPOUT=${8:-0.1}
 TARGET_MODULES=${9:-q_proj,v_proj}
 BASE_MODEL=${10:-meta-llama/Llama-3.1-8B}
 LORA_FORMAT=${11:-peft}
+LINEAR_ADAPTER_TYPE=${12:-lora}
+LINEAR_ACT_FN=${13:-identity}
 
 if [ -z "$RUN_ID" ] || [ -z "$LORA_CHECKPOINT" ] || [ -z "$CERA_CHECKPOINT" ]; then
     echo "[ERROR] Missing required arguments."
@@ -50,6 +53,10 @@ esac
 case "$LORA_FORMAT" in
     peft|legacy) ;;
     *) echo "[ERROR] LORA_FORMAT must be peft or legacy."; exit 1 ;;
+esac
+case "$LINEAR_ADAPTER_TYPE" in
+    lora|cera) ;;
+    *) echo "[ERROR] LINEAR_ADAPTER_TYPE must be lora or cera."; exit 1 ;;
 esac
 
 module purge
@@ -83,6 +90,8 @@ singularity exec --nv -B /work \
         --lora_checkpoint "$LORA_CHECKPOINT" \
         --cera_checkpoint "$CERA_CHECKPOINT" \
         --lora_adapter_format "$LORA_FORMAT" \
+        --linear_adapter_type "$LINEAR_ADAPTER_TYPE" \
+        --linear_act_fn "$LINEAR_ACT_FN" \
         --rank "$RANK" \
         --alpha "$ALPHA" \
         --dropout "$DROPOUT" \

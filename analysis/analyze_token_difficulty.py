@@ -38,6 +38,14 @@ def parse_args():
                         default="metamathqa")
     parser.add_argument("--lora_checkpoint")
     parser.add_argument("--cera_checkpoint")
+    parser.add_argument(
+        "--linear_adapter_type", choices=("lora", "cera"), default="lora",
+        help="Use 'cera' to compare a CeRA identity checkpoint against CeRA SiLU.",
+    )
+    parser.add_argument(
+        "--linear_act_fn", choices=("identity",), default="identity",
+        help="Activation for the linear-side CeRA checkpoint.",
+    )
     parser.add_argument("--lora_adapter_format", choices=("peft", "legacy"),
                         default="peft")
     parser.add_argument("--rank", type=int, default=64)
@@ -137,7 +145,27 @@ def validate_checkpoint_pair(args):
                     f"{name} targets mismatch: {actual_targets} != {expected_targets}"
                 )
 
-    if args.lora_adapter_format == "peft":
+    if args.linear_adapter_type == "cera":
+        if args.lora_adapter_format != "legacy":
+            raise ValueError("CeRA identity checkpoints require --lora_adapter_format legacy.")
+        linear_checkpoint = torch.load(
+            args.lora_checkpoint, map_location="cpu", weights_only=True
+        )
+        linear_config = linear_checkpoint.get("config") or {}
+        if linear_config.get("act_fn") != args.linear_act_fn:
+            raise ValueError(
+                f"Linear CeRA activation mismatch: {linear_config.get('act_fn')!r} "
+                f"!= {args.linear_act_fn!r}"
+            )
+        if cera_config.get("act_fn") == args.linear_act_fn:
+            raise ValueError("The nonlinear CeRA checkpoint must not use identity activation.")
+        for key in ("model", "rank", "target_modules", "dropout", "epochs", "seed"):
+            if linear_config.get(key) != cera_config.get(key):
+                raise ValueError(
+                    f"CeRA identity/SiLU metadata mismatch for {key}: "
+                    f"{linear_config.get(key)!r} != {cera_config.get(key)!r}"
+                )
+    elif args.lora_adapter_format == "peft":
         config_path = Path(args.lora_checkpoint) / "adapter_config.json"
         if not config_path.is_file():
             raise FileNotFoundError(config_path)
@@ -210,14 +238,15 @@ def load_base_model(args, hf_token, revision_kwargs):
 
 def adapter_namespace(args, model_name):
     is_lora = model_name == "lora"
+    adapter_type = args.linear_adapter_type if is_lora else "cera"
     return Namespace(
         base_model=args.base_model,
-        adapter_type="lora" if is_lora else "cera",
+        adapter_type=adapter_type,
         rank=args.rank,
         checkpoint=args.lora_checkpoint if is_lora else args.cera_checkpoint,
         adapter_format=args.lora_adapter_format if is_lora else "legacy",
         alpha=args.alpha,
-        act_fn=args.act_fn,
+        act_fn=args.linear_act_fn if is_lora and adapter_type == "cera" else args.act_fn,
         dropout=args.dropout,
         target_modules=args.target_modules,
         explicit_options=set(),
