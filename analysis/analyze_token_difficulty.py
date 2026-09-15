@@ -9,6 +9,7 @@ tokens are scored; prompts are context but never observations.
 import argparse
 import gc
 import json
+import math
 import os
 import random
 import sys
@@ -35,8 +36,8 @@ def parse_args():
     parser.add_argument("--base_model", default="meta-llama/Llama-3.1-8B")
     parser.add_argument("--dataset", choices=("metamathqa", "gsm8k", "math500"),
                         default="metamathqa")
-    parser.add_argument("--lora_checkpoint", required=True)
-    parser.add_argument("--cera_checkpoint", required=True)
+    parser.add_argument("--lora_checkpoint")
+    parser.add_argument("--cera_checkpoint")
     parser.add_argument("--lora_adapter_format", choices=("peft", "legacy"),
                         default="peft")
     parser.add_argument("--rank", type=int, default=64)
@@ -51,6 +52,11 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=20260915)
     parser.add_argument("--output_dir", type=Path, required=True)
     parser.add_argument("--keep_model_files", action="store_true")
+    parser.add_argument(
+        "--reanalyze_tokens",
+        type=Path,
+        help="Recompute summary statistics from an existing tokens.jsonl without loading models.",
+    )
     return parser.parse_args()
 
 
@@ -334,6 +340,55 @@ def rank_values(values):
     return ranks
 
 
+def trimmed_mean(values, proportion=0.01):
+    ordered = np.sort(values)
+    trim = int(len(ordered) * proportion)
+    if trim == 0:
+        return float(ordered.mean())
+    return float(ordered[trim:-trim].mean())
+
+
+def exact_mcnemar(lora_wrong_cera_correct, lora_correct_cera_wrong):
+    discordant = lora_wrong_cera_correct + lora_correct_cera_wrong
+    if discordant == 0:
+        return 1.0
+    smaller = min(lora_wrong_cera_correct, lora_correct_cera_wrong)
+    tail = sum(math.comb(discordant, index) for index in range(smaller + 1))
+    return min(1.0, 2.0 * tail / (2 ** discordant))
+
+
+def partial_rank_correlation(first, second, control):
+    design = np.column_stack((np.ones(len(control)), rank_values(control)))
+    first_residual = rank_values(first) - design @ np.linalg.lstsq(
+        design, rank_values(first), rcond=None
+    )[0]
+    second_residual = rank_values(second) - design @ np.linalg.lstsq(
+        design, rank_values(second), rcond=None
+    )[0]
+    return float(np.corrcoef(first_residual, second_residual)[0, 1])
+
+
+def transition_summary(selected_records):
+    lora_wrong_cera_correct = sum(
+        not record["lora_top1_correct"] and record["cera_top1_correct"]
+        for record in selected_records
+    )
+    lora_correct_cera_wrong = sum(
+        record["lora_top1_correct"] and not record["cera_top1_correct"]
+        for record in selected_records
+    )
+    return {
+        "lora_wrong_cera_correct": int(lora_wrong_cera_correct),
+        "lora_correct_cera_wrong": int(lora_correct_cera_wrong),
+        "net_cera_corrections": int(
+            lora_wrong_cera_correct - lora_correct_cera_wrong
+        ),
+        "exact_mcnemar_p": exact_mcnemar(
+            lora_wrong_cera_correct, lora_correct_cera_wrong
+        ),
+    }
+
+
 def summarize(combined_path, bootstrap, seed):
     base_nll = []
     benefit = []
@@ -351,6 +406,15 @@ def summarize(combined_path, bootstrap, seed):
 
     base_nll_array = np.asarray(base_nll, dtype=np.float64)
     benefit_array = np.asarray(benefit, dtype=np.float64)
+    sample_positions = {}
+    relative_positions = np.empty(len(records), dtype=np.float64)
+    for record_index, record in enumerate(records):
+        sample_positions.setdefault(record["sample_id"], []).append(record_index)
+    for indices in sample_positions.values():
+        denominator = max(1, len(indices) - 1)
+        for order, record_index in enumerate(indices):
+            relative_positions[record_index] = order / denominator
+
     boundaries = np.quantile(base_nll_array, np.linspace(0, 1, 11))
     bins = np.clip(np.searchsorted(boundaries[1:-1], base_nll_array, side="right"), 0, 9)
     unique_samples = sorted(set(sample_ids))
@@ -382,6 +446,7 @@ def summarize(combined_path, bootstrap, seed):
             [record["cera_benefit"] for record in selected_records], dtype=np.float64
         )
         draws = bootstrap_means[:, bin_index]
+        transitions = transition_summary(selected_records)
         bin_rows.append({
             "difficulty_decile": bin_index + 1,
             "n_tokens": len(selected_records),
@@ -390,6 +455,7 @@ def summarize(combined_path, bootstrap, seed):
             ])),
             "cera_benefit_mean": float(values.mean()),
             "cera_benefit_median": float(np.median(values)),
+            "cera_benefit_trimmed_mean_1pct": trimmed_mean(values),
             "cera_token_win_rate": float(np.mean(values > 0)),
             "bootstrap_ci95": [
                 float(np.nanquantile(draws, 0.025)),
@@ -404,24 +470,86 @@ def summarize(combined_path, bootstrap, seed):
             "cera_top1_accuracy": float(np.mean([
                 record["cera_top1_correct"] for record in selected_records
             ])),
-            "lora_wrong_cera_correct": int(sum(
-                not record["lora_top1_correct"] and record["cera_top1_correct"]
-                for record in selected_records
-            )),
-            "lora_correct_cera_wrong": int(sum(
-                record["lora_top1_correct"] and not record["cera_top1_correct"]
-                for record in selected_records
-            )),
+            **transitions,
         })
 
     correlation = float(np.corrcoef(
         rank_values(base_nll_array), rank_values(benefit_array)
     )[0, 1])
+    tail_mask = base_nll_array >= boundaries[8]
+    sample_benefit_means = np.asarray([
+        np.mean([records[index]["cera_benefit"] for index in indices])
+        for indices in sample_positions.values()
+    ])
+
+    cluster_tail_sums = np.zeros((len(unique_samples), 2), dtype=np.float64)
+    cluster_tail_counts = np.zeros((len(unique_samples), 2), dtype=np.int64)
+    for record_index, record in enumerate(records):
+        row = sample_index[record["sample_id"]]
+        group = int(tail_mask[record_index])
+        cluster_tail_sums[row, group] += record["cera_benefit"]
+        cluster_tail_counts[row, group] += 1
+    tail_contrast_draws = np.full(bootstrap, np.nan, dtype=np.float64)
+    for draw in range(bootstrap):
+        selected = rng.integers(0, len(unique_samples), size=len(unique_samples))
+        sums = cluster_tail_sums[selected].sum(axis=0)
+        counts = cluster_tail_counts[selected].sum(axis=0)
+        if np.all(counts > 0):
+            tail_contrast_draws[draw] = sums[1] / counts[1] - sums[0] / counts[0]
+
+    absolute_order = np.argsort(np.abs(benefit_array))[::-1]
+    top_one_percent = max(1, int(np.ceil(len(records) * 0.01)))
+    absolute_total = np.abs(benefit_array).sum()
+    tail_records = [record for record, is_tail in zip(records, tail_mask) if is_tail]
+    rest_records = [record for record, is_tail in zip(records, tail_mask) if not is_tail]
+    tail_values = benefit_array[tail_mask]
+    rest_values = benefit_array[~tail_mask]
+    signed_total = benefit_array.sum()
     return {
         "n_samples": len(unique_samples),
         "n_tokens": len(records),
         "spearman_base_nll_vs_cera_benefit": correlation,
+        "spearman_base_nll_vs_response_position": float(np.corrcoef(
+            rank_values(base_nll_array), rank_values(relative_positions)
+        )[0, 1]),
+        "spearman_cera_benefit_vs_response_position": float(np.corrcoef(
+            rank_values(benefit_array), rank_values(relative_positions)
+        )[0, 1]),
+        "partial_spearman_difficulty_vs_benefit_controlling_position":
+            partial_rank_correlation(base_nll_array, benefit_array, relative_positions),
         "overall_cera_benefit_mean": float(benefit_array.mean()),
+        "overall_cera_benefit_median": float(np.median(benefit_array)),
+        "overall_cera_benefit_trimmed_mean_1pct": trimmed_mean(benefit_array),
+        "per_sample_cera_benefit": {
+            "mean": float(sample_benefit_means.mean()),
+            "median": float(np.median(sample_benefit_means)),
+            "positive_rate": float(np.mean(sample_benefit_means > 0)),
+            "quantiles": np.quantile(
+                sample_benefit_means, [0, 0.1, 0.25, 0.5, 0.75, 0.9, 1]
+            ).tolist(),
+        },
+        "outlier_sensitivity": {
+            "top_1pct_absolute_benefit_share": float(
+                np.abs(benefit_array[absolute_order[:top_one_percent]]).sum()
+                / absolute_total
+            ) if absolute_total else 0.0,
+            "tail_signed_gain_share": float(tail_values.sum() / signed_total)
+                if signed_total else None,
+        },
+        "hardest_20pct_vs_rest": {
+            "base_nll_threshold": float(boundaries[8]),
+            "tail_n_tokens": int(tail_mask.sum()),
+            "rest_n_tokens": int((~tail_mask).sum()),
+            "tail_cera_benefit_mean": float(tail_values.mean()),
+            "rest_cera_benefit_mean": float(rest_values.mean()),
+            "mean_contrast": float(tail_values.mean() - rest_values.mean()),
+            "cluster_bootstrap_contrast_ci95": [
+                float(np.nanquantile(tail_contrast_draws, 0.025)),
+                float(np.nanquantile(tail_contrast_draws, 0.975)),
+            ],
+            "tail_transitions": transition_summary(tail_records),
+            "rest_transitions": transition_summary(rest_records),
+        },
         "difficulty_boundaries": boundaries.tolist(),
         "bins": bin_rows,
     }
@@ -434,8 +562,29 @@ def main():
     torch.manual_seed(args.seed)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    if args.num_samples < 1 or args.batch_size < 1 or args.bootstrap < 1:
+    if args.bootstrap < 1:
+        raise ValueError("bootstrap must be positive.")
+    if args.reanalyze_tokens is not None:
+        if not args.reanalyze_tokens.is_file():
+            raise FileNotFoundError(args.reanalyze_tokens)
+        summary = summarize(args.reanalyze_tokens, args.bootstrap, args.seed)
+        summary["config"] = {
+            "reanalyze_tokens": str(args.reanalyze_tokens),
+            "bootstrap": args.bootstrap,
+            "seed": args.seed,
+        }
+        summary_path = args.output_dir / "summary.json"
+        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        print(json.dumps(summary, indent=2))
+        print(f"[DONE] Reanalysis summary: {summary_path}")
+        return
+
+    if args.num_samples < 1 or args.batch_size < 1:
         raise ValueError("num_samples, batch_size, and bootstrap must be positive.")
+    if not args.lora_checkpoint or not args.cera_checkpoint:
+        raise ValueError(
+            "lora_checkpoint and cera_checkpoint are required unless --reanalyze_tokens is used."
+        )
     if not Path(args.cera_checkpoint).is_file():
         raise FileNotFoundError(args.cera_checkpoint)
     lora_path = Path(args.lora_checkpoint)
