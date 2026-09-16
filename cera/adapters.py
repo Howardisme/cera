@@ -15,6 +15,7 @@ Both wrappers expose a track_activation flag for downstream SVD/ER analysis.
 """
 
 from typing import List, Optional
+import math
 
 import torch
 import torch.nn as nn
@@ -59,6 +60,9 @@ class CeRAAdapter(nn.Module):
         device=None,
         dtype=None,
         rank: Optional[int] = None,
+        variant: str = "legacy",
+        scaling: float = 1.0,
+        recurrent_steps: int = 0,
     ):
         super().__init__()
         hidden_dim = rank if rank is not None else int(input_dim * expansion_factor)
@@ -80,14 +84,46 @@ class CeRAAdapter(nn.Module):
 
         self.B = nn.Linear(hidden_dim, output_dim, bias=False, device=device, dtype=dtype)
         self.dropout = nn.Dropout(dropout)
+        if variant not in {"legacy", "peft_aligned"}:
+            raise ValueError(f"Unknown CeRA variant {variant!r}.")
+        self.variant = variant
+        self.scaling = scaling
+        if recurrent_steps < 0:
+            raise ValueError("CeRA recurrent_steps must be nonnegative.")
+        if recurrent_steps and (variant != "peft_aligned" or act_fn != "identity"):
+            raise ValueError(
+                "Recurrent CeRA requires variant='peft_aligned' and act_fn='identity'."
+            )
+        self.recurrent_steps = recurrent_steps
 
         # Activation tracking -- enable before a forward pass to capture last_delta
         # for SVD / Effective Rank analysis. Disabled by default (no overhead).
         self.track_activation: bool = False
         self.last_delta: Optional[torch.Tensor] = None
 
-        nn.init.kaiming_normal_(self.A.weight, nonlinearity="relu")
+        if variant == "peft_aligned":
+            nn.init.kaiming_uniform_(self.A.weight, a=math.sqrt(5))
+        else:
+            nn.init.kaiming_normal_(self.A.weight, nonlinearity="relu")
         nn.init.zeros_(self.B.weight)
+        if recurrent_steps:
+            recurrent_devices = (
+                [torch.device(device)]
+                if device is not None and torch.device(device).type == "cuda"
+                else []
+            )
+            with torch.random.fork_rng(devices=recurrent_devices):
+                self.recurrent_norm = nn.RMSNorm(
+                    hidden_dim, elementwise_affine=False, device=device, dtype=dtype
+                )
+                self.recurrent_inner = nn.Linear(
+                    hidden_dim, hidden_dim, bias=False, device=device, dtype=dtype
+                )
+                self.recurrent_outer = nn.Linear(
+                    hidden_dim, hidden_dim, bias=False, device=device, dtype=dtype
+                )
+                nn.init.kaiming_uniform_(self.recurrent_inner.weight, a=math.sqrt(5))
+                nn.init.zeros_(self.recurrent_outer.weight)
 
     def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
@@ -104,7 +140,17 @@ class CeRAAdapter(nn.Module):
                                       missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        delta = self.B(self.dropout(self.act_fn(self.A(x.to(self.A.weight.dtype)))))
+        x = x.to(self.A.weight.dtype)
+        if self.variant == "peft_aligned":
+            state = self.act_fn(self.A(self.dropout(x)))
+            for _ in range(self.recurrent_steps):
+                update = self.recurrent_outer(
+                    F.silu(self.recurrent_inner(self.recurrent_norm(state)))
+                )
+                state = state + update / self.recurrent_steps
+            delta = self.B(state) * self.scaling
+        else:
+            delta = self.B(self.dropout(self.act_fn(self.A(x))))
         if self.track_activation:
             self.last_delta = delta.detach().cpu().float()
         return delta
@@ -130,6 +176,9 @@ class CeRAWrapper(nn.Module):
         act_fn: str = "silu",
         rank: Optional[int] = None,
         adapter_dtype: Optional[torch.dtype] = None,
+        variant: str = "legacy",
+        scaling: float = 1.0,
+        recurrent_steps: int = 0,
     ):
         super().__init__()
         self.original_layer = original_layer
@@ -145,6 +194,9 @@ class CeRAWrapper(nn.Module):
             device=original_layer.weight.device,
             dtype=adapter_dtype or original_layer.weight.dtype,
             rank=rank,
+            variant=variant,
+            scaling=scaling,
+            recurrent_steps=recurrent_steps,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -289,6 +341,9 @@ def apply_cera(
     *,
     rank: Optional[int] = None,
     adapter_dtype: Optional[torch.dtype] = None,
+    variant: str = "legacy",
+    alpha: Optional[int] = None,
+    recurrent_steps: int = 0,
 ) -> nn.Module:
     """
     Inject CeRA adapters into self-attention projections of a Llama model.
@@ -307,6 +362,18 @@ def apply_cera(
     """
     if target_modules is None:
         target_modules = ["q_proj", "v_proj"]
+
+    if variant not in {"legacy", "peft_aligned"}:
+        raise ValueError(f"Unknown CeRA variant {variant!r}.")
+    if variant == "peft_aligned" and rank is None:
+        raise ValueError("peft_aligned CeRA requires a fixed rank.")
+    if recurrent_steps < 0:
+        raise ValueError("CeRA recurrent_steps must be nonnegative.")
+    if recurrent_steps and (variant != "peft_aligned" or act_fn != "identity"):
+        raise ValueError(
+            "Recurrent CeRA requires variant='peft_aligned' and act_fn='identity'."
+        )
+    scaling = (alpha if alpha is not None else rank) / rank if rank is not None else 1.0
 
     if rank is not None:
         if rank < 1 or not target_modules or len(set(target_modules)) != len(target_modules):
@@ -338,8 +405,13 @@ def apply_cera(
             setattr(group, name, CeRAWrapper(
                 module, module.in_features, module.out_features, expansion_factor,
                 dropout=dropout, act_fn=act_fn, rank=rank, adapter_dtype=adapter_dtype,
+                variant=variant, scaling=scaling, recurrent_steps=recurrent_steps,
             ))
-        print(f"[INFO] Applied fixed-rank CeRA | rank={rank} | projections={len(replacements)}")
+        print(
+            f"[INFO] Applied fixed-rank CeRA | rank={rank} | variant={variant} | "
+            f"scale={scaling} | recurrent_steps={recurrent_steps} | "
+            f"projections={len(replacements)}"
+        )
         return model
 
     layer_tag = "all" if layer_indices is None else layer_indices

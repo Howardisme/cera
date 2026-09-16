@@ -36,6 +36,8 @@ MAX_STEPS=${MAX_STEPS:--1}
 MAX_TRAIN_SAMPLES=${MAX_TRAIN_SAMPLES:-100000}
 EVAL_BATCHES=${EVAL_BATCHES:-200}
 ACT_FN=${ACT_FN:-silu}
+CERA_VARIANT=${CERA_VARIANT:-legacy}
+RECURRENT_STEPS=${RECURRENT_STEPS:-0}
 
 if [ "$TARGET_MODULES" = "all_linear" ]; then
     TARGET_MODULES="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
@@ -52,7 +54,7 @@ mkdir -p "$HF_CACHE"
 cd "${SLURM_SUBMIT_DIR:?SLURM_SUBMIT_DIR not set — run via sbatch}"
 mkdir -p slurm_logs
 
-echo "[START] Job ID: ${SLURM_JOB_ID:-local} | pipeline=PEFT | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL} targets=${TARGET_MODULES} seed=${SEED} attn=${ATTN_IMPL}"
+echo "[START] Job ID: ${SLURM_JOB_ID:-local} | pipeline=PEFT | ${MODEL_TYPE} R=${RANK} lr=${LR} D=${DROPOUT} A=${ALPHA} dataset=${DATASET} E=${EPOCHS} model=${BASE_MODEL} targets=${TARGET_MODULES} seed=${SEED} attn=${ATTN_IMPL} variant=${CERA_VARIANT} K=${RECURRENT_STEPS}"
 
 singularity exec --nv -B /work \
     --env PYTHONPATH="$PYPKGS" \
@@ -72,6 +74,8 @@ singularity exec --nv -B /work \
         --seed            "$SEED" \
         --attn_impl       "$ATTN_IMPL" \
         --act_fn          "$ACT_FN" \
+        --cera_variant    "$CERA_VARIANT" \
+        --recurrent_steps "$RECURRENT_STEPS" \
         --max_steps       "$MAX_STEPS" \
         --max_train_samples "$MAX_TRAIN_SAMPLES" \
         --eval_batches    "$EVAL_BATCHES"

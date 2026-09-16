@@ -1,5 +1,7 @@
 """Local CeRA interoperability helpers for the shared Trainer pipeline."""
 
+import math
+
 import torch
 
 from cera.adapters import CeRAWrapper, apply_cera
@@ -33,10 +35,32 @@ def adapter_manifest(model):
 
 
 def validate_cera_config(config):
-    if config.get("cera_format_version") != 1 or config.get("rank_mode") != "fixed":
+    if config.get("cera_format_version") not in (1, 2, 3) or config.get("rank_mode") != "fixed":
         raise ValueError("Unsupported CeRA checkpoint format or rank mode.")
-    if config.get("scale") != 1.0:
-        raise ValueError("This CeRA implementation requires unit output scale.")
+    variant = config.get("cera_variant", "legacy")
+    if variant not in ("legacy", "peft_aligned"):
+        raise ValueError("Unsupported CeRA implementation variant.")
+    if variant == "legacy" and config.get("scale") != 1.0:
+        raise ValueError("Legacy CeRA requires unit output scale.")
+    if variant == "peft_aligned" and config.get("scale") != config.get("alpha") / config.get("rank"):
+        raise ValueError("Aligned CeRA scale must equal alpha / rank.")
+    recurrent_steps = config.get("recurrent_steps", 0)
+    if not isinstance(recurrent_steps, int) or recurrent_steps < 0:
+        raise ValueError("Invalid CeRA recurrent step count.")
+    if recurrent_steps:
+        if config.get("cera_format_version") != 3:
+            raise ValueError("Recurrent CeRA requires checkpoint format version 3.")
+        if variant != "peft_aligned" or config.get("act_fn") != "identity":
+            raise ValueError("Recurrent CeRA requires PEFT-aligned identity semantics.")
+        if (config.get("recurrent_activation") != "silu"
+                or config.get("recurrent_step_weight_sharing") is not True
+                or not math.isclose(
+                    config.get("recurrent_update_scale", float("nan")),
+                    1 / recurrent_steps,
+                    rel_tol=0,
+                    abs_tol=1e-12,
+                )):
+            raise ValueError("Unsupported recurrent CeRA architecture metadata.")
     if config.get("adapter_dtype") not in ("float32", "bfloat16", "float16"):
         raise ValueError("Invalid CeRA adapter dtype.")
     if config.get("model_type") != "CeRA" or config.get("rank", 0) < 1:
@@ -57,6 +81,7 @@ def load_cera_weights(model, state):
 
 
 def restore_cera(model, checkpoint, *, rank, dropout, act_fn, target_modules):
+    """Restore CeRA using versioned checkpoint metadata when available."""
     config = checkpoint.get("config")
     if config is not None and "cera_format_version" in config:
         validate_cera_config(config)
@@ -64,6 +89,8 @@ def restore_cera(model, checkpoint, *, rank, dropout, act_fn, target_modules):
             model, rank=config["rank"], dropout=config["dropout"],
             act_fn=config["act_fn"], target_modules=config["target_modules"].split(","),
             adapter_dtype=getattr(torch, config["adapter_dtype"]),
+            variant=config.get("cera_variant", "legacy"), alpha=config.get("alpha"),
+            recurrent_steps=config.get("recurrent_steps", 0),
         )
     else:
         model = apply_cera(
@@ -78,9 +105,18 @@ def validate_cera_budget(model, rank, expected_projections):
     wrappers = [module for module in model.modules() if isinstance(module, CeRAWrapper)]
     if len(wrappers) != expected_projections:
         raise ValueError(f"Expected {expected_projections} projections, got {len(wrappers)}")
-    expected = sum(rank * (module.original_layer.in_features + module.original_layer.out_features)
-                   for module in wrappers)
+    expected = sum(
+        rank * (module.original_layer.in_features + module.original_layer.out_features)
+        + (2 * rank * rank if module.cera.recurrent_steps else 0)
+        for module in wrappers
+    )
     actual = sum(param.numel() for param in model.parameters() if param.requires_grad)
-    if actual != expected or any(module.cera.A.out_features != rank for module in wrappers):
+    if (actual != expected
+            or any(module.cera.A.out_features != rank for module in wrappers)
+            or any(module.cera.recurrent_steps and (
+                module.cera.recurrent_inner.in_features != rank
+                or module.cera.recurrent_outer.out_features != rank
+                or module.cera.recurrent_norm.elementwise_affine
+            ) for module in wrappers)):
         raise ValueError(f"CeRA budget mismatch: expected={expected}, actual={actual}")
     return actual

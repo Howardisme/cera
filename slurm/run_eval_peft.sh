@@ -37,6 +37,8 @@ TARGET_MODULES=${10:-q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj}
 SEED=${11:-42}
 CHECKPOINT=${12:-${CHECKPOINT_PATH:-}}
 ACT_FN=${ACT_FN:-silu}
+CERA_VARIANT=${CERA_VARIANT:-legacy}
+RECURRENT_STEPS=${RECURRENT_STEPS:-0}
 ADAPTER_FORMAT=peft
 
 if [ "$TARGET_MODULES" = "all_linear" ]; then
@@ -77,12 +79,12 @@ case "$LR" in
 esac
 
 if [ -z "$CHECKPOINT" ]; then
-    CHECKPOINT=$(python3 - "$METHOD" "$DATASET" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" "$ALPHA" "$TARGET_MODULES" "$SEED" "$ACT_FN" <<'PYSELECT'
+    CHECKPOINT=$(python3 - "$METHOD" "$DATASET" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" "$ALPHA" "$TARGET_MODULES" "$SEED" "$ACT_FN" "$CERA_VARIANT" "$RECURRENT_STEPS" <<'PYSELECT'
 import json
 import sys
 from pathlib import Path
 
-method, dataset, rank, lr, dropout, base, alpha, targets, seed, activation = sys.argv[1:]
+method, dataset, rank, lr, dropout, base, alpha, targets, seed, activation, variant, recurrent_steps = sys.argv[1:]
 expected = dict(model_type=method, dataset=dataset, rank=int(rank), lr=float(lr),
                 dropout=float(dropout), model=base, seed=int(seed))
 matches = []
@@ -93,7 +95,10 @@ for log_path in Path("results").glob(f"Exp_PEFT_{method}_*/{method}/{method}_log
     if set(config.get("target_modules", "").split(",")) != set(targets.split(",")):
         continue
     if method == "CeRA":
-        if config.get("cera_format_version") != 1 or config.get("act_fn") != activation:
+        if (config.get("act_fn") != activation
+                or config.get("cera_variant", "legacy") != variant
+                or config.get("recurrent_steps", 0) != int(recurrent_steps)
+                or (variant == "peft_aligned" and config.get("alpha") != int(alpha))):
             continue
         pattern = "cera_ckpt_best_*.pt"
     else:

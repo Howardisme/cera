@@ -161,7 +161,7 @@ def validate_checkpoint_pair(args):
             raise ValueError("The nonlinear CeRA checkpoint must not use identity activation.")
         for key in (
             "model", "rank", "target_modules", "dropout", "epochs", "seed",
-            "cera_variant", "alpha", "dropout_position",
+            "cera_variant", "alpha", "dropout_position", "recurrent_steps",
         ):
             if linear_config.get(key) != cera_config.get(key):
                 raise ValueError(

@@ -391,6 +391,10 @@ def parse_args() -> argparse.Namespace:
                    help="LoRA/DoRA input dropout, or CeRA bottleneck dropout.")
     p.add_argument("--act_fn",  choices=["silu", "relu", "identity"], default="silu",
                    help="CeRA only.")
+    p.add_argument("--cera_variant", choices=["legacy", "peft_aligned"], default="legacy",
+                   help="CeRA implementation; legacy preserves existing checkpoints.")
+    p.add_argument("--recurrent_steps", type=int, default=0,
+                   help="Shared rank-space correction steps; PEFT-aligned identity CeRA only.")
     p.add_argument("--target_modules", default="q_proj,k_proj,v_proj,o_proj,"
                                                 "gate_proj,up_proj,down_proj",
                    help="Comma-separated target projections (default: all_linear).")
@@ -420,6 +424,14 @@ def parse_args() -> argparse.Namespace:
         p.error("Require 1 <= max_train_samples <= 100000 and eval_batches >= 1.")
     if args.max_steps == 0 or args.max_steps < -1 or args.rank < 1:
         p.error("Require positive rank and max_steps=-1 or a positive step count.")
+    if args.recurrent_steps < 0:
+        p.error("Require recurrent_steps >= 0.")
+    if args.recurrent_steps and (
+        args.model_type != "CeRA"
+        or args.cera_variant != "peft_aligned"
+        or args.act_fn != "identity"
+    ):
+        p.error("Recurrent steps require PEFT-aligned CeRA with identity activation.")
     return args
 
 
@@ -463,13 +475,21 @@ def main():
     model_suffix = f"_{model_tag}" if args.base_model != DEFAULT_MODEL else ""
     alpha_suffix = (
         f"_A{args.alpha}"
-        if args.model_type in ("LoRA", "DoRA") and args.alpha != 32
+        if ((args.model_type in ("LoRA", "DoRA") and args.alpha != 32)
+            or (args.model_type == "CeRA" and args.cera_variant == "peft_aligned"
+                and args.alpha != args.rank))
         else ""
     )
     seed_suffix = f"_S{args.seed}" if args.seed != DEFAULT_SEED else ""
+    variant_suffix = (
+        f"_{args.cera_variant}"
+        if args.model_type == "CeRA" and args.cera_variant != "legacy"
+        else ""
+    )
+    recurrent_suffix = f"_K{args.recurrent_steps}" if args.recurrent_steps else ""
     exp_name  = (
         f"Exp_PEFT_{args.model_type}_{args.dataset}"
-        f"_R{args.rank}_lr{args.lr}_{args.act_fn}_{tgt_str}"
+        f"_R{args.rank}_lr{args.lr}_{args.act_fn}{variant_suffix}{recurrent_suffix}_{tgt_str}"
         f"_D{args.dropout}_E{args.epochs}{alpha_suffix}{seed_suffix}{model_suffix}_{timestamp}"
     )
     smoke_run = args.max_steps > 0 or args.max_train_samples < 100_000 or args.eval_batches < 200
@@ -491,6 +511,8 @@ def main():
     print(f"[INFO] Config: pipeline=PEFT | model={args.model_type} | "
           f"dataset={args.dataset} | rank={args.rank} | alpha={args.alpha} | "
           f"lr={args.lr} | dropout={args.dropout} | act_fn={args.act_fn} | "
+            f"cera_variant={args.cera_variant} | "
+                    f"recurrent_steps={args.recurrent_steps} | "
           f"targets={target_modules} | epochs={args.epochs} | seed={args.seed}")
 
     # -- Tokenizer ------------------------------------------------------------
@@ -538,9 +560,13 @@ def main():
             dropout        = args.dropout,
             act_fn         = args.act_fn,
             target_modules = target_modules,
+            variant        = args.cera_variant,
+            alpha          = args.alpha,
+            recurrent_steps= args.recurrent_steps,
         )
         count = validate_cera_budget(model, args.rank, len(model.model.layers) * len(target_modules))
-        print(f"[AUDIT] CeRA trainable parameters: {count:,} | scale=1")
+        cera_scale = args.alpha / args.rank if args.cera_variant == "peft_aligned" else 1.0
+        print(f"[AUDIT] CeRA trainable parameters: {count:,} | scale={cera_scale}")
     else:
         use_dora = (args.model_type == "DoRA")
         print(f"[INFO] Applying PEFT LoRA | rank={args.rank} | alpha={args.alpha} | "
@@ -565,6 +591,8 @@ def main():
         "lr":             args.lr,
         "dropout":        args.dropout,
         "act_fn":         args.act_fn  if args.model_type == "CeRA" else "linear",
+        "cera_variant":   args.cera_variant if args.model_type == "CeRA" else None,
+        "recurrent_steps": args.recurrent_steps if args.model_type == "CeRA" else None,
         "alpha":          args.alpha   if args.model_type in ("LoRA", "DoRA") else None,
         "target_modules": args.target_modules,
         "epochs":         args.epochs,
@@ -590,9 +618,22 @@ def main():
                      for name in ("torch", "transformers", "peft", "trl", "accelerate", "datasets")},
     }
     if args.model_type == "CeRA":
-        config.update(cera_format_version=1, rank_mode="fixed", scale=1.0,
+        config.update(cera_format_version=(3 if args.recurrent_steps else 2),
+                  rank_mode="fixed", scale=cera_scale,
+                      alpha=args.alpha,
                       adapter_dtype=str(adapter_dtype).removeprefix("torch."),
-                      initialization="kaiming_normal_A_zero_B")
+                      initialization=("kaiming_uniform_A_zero_B" if args.cera_variant == "peft_aligned"
+                                      else "kaiming_normal_A_zero_B"),
+                      dropout_position=("input" if args.cera_variant == "peft_aligned"
+                                        else "post_activation"))
+        if args.recurrent_steps:
+            config.update(
+                recurrent_activation="silu",
+                recurrent_step_weight_sharing=True,
+                recurrent_update_scale=1 / args.recurrent_steps,
+                recurrent_initialization="kaiming_uniform_inner_zero_outer",
+                recurrent_norm="rmsnorm_no_affine",
+            )
     print(f"[AUDIT] Trainable dtypes: {sorted({entry['dtype'] for entry in config['parameter_manifest'].values()})}")
 
     # -- SFTTrainer -----------------------------------------------------------
