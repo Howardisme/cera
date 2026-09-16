@@ -159,7 +159,10 @@ def validate_checkpoint_pair(args):
             )
         if cera_config.get("act_fn") == args.linear_act_fn:
             raise ValueError("The nonlinear CeRA checkpoint must not use identity activation.")
-        for key in ("model", "rank", "target_modules", "dropout", "epochs", "seed"):
+        for key in (
+            "model", "rank", "target_modules", "dropout", "epochs", "seed",
+            "cera_variant", "alpha", "dropout_position",
+        ):
             if linear_config.get(key) != cera_config.get(key):
                 raise ValueError(
                     f"CeRA identity/SiLU metadata mismatch for {key}: "
@@ -418,6 +421,49 @@ def transition_summary(selected_records):
     }
 
 
+def group_contrast_summary(records, hard_mask, unique_samples, sample_index,
+                           bootstrap, seed):
+    benefit = np.asarray([record["cera_benefit"] for record in records], dtype=np.float64)
+    hard_mask = np.asarray(hard_mask, dtype=bool)
+    if not hard_mask.any() or hard_mask.all():
+        raise ValueError("Difficulty grouping must contain both hard and easy tokens.")
+
+    cluster_sums = np.zeros((len(unique_samples), 2), dtype=np.float64)
+    cluster_counts = np.zeros((len(unique_samples), 2), dtype=np.int64)
+    for record_index, record in enumerate(records):
+        row = sample_index[record["sample_id"]]
+        group = int(hard_mask[record_index])
+        cluster_sums[row, group] += benefit[record_index]
+        cluster_counts[row, group] += 1
+
+    rng = np.random.default_rng(seed)
+    contrast_draws = np.full(bootstrap, np.nan, dtype=np.float64)
+    for draw in range(bootstrap):
+        selected = rng.integers(0, len(unique_samples), size=len(unique_samples))
+        sums = cluster_sums[selected].sum(axis=0)
+        counts = cluster_counts[selected].sum(axis=0)
+        if np.all(counts > 0):
+            contrast_draws[draw] = sums[1] / counts[1] - sums[0] / counts[0]
+
+    hard_records = [record for record, is_hard in zip(records, hard_mask) if is_hard]
+    easy_records = [record for record, is_hard in zip(records, hard_mask) if not is_hard]
+    hard_values = benefit[hard_mask]
+    easy_values = benefit[~hard_mask]
+    return {
+        "hard_n_tokens": int(hard_mask.sum()),
+        "easy_n_tokens": int((~hard_mask).sum()),
+        "hard_cera_benefit_mean": float(hard_values.mean()),
+        "easy_cera_benefit_mean": float(easy_values.mean()),
+        "mean_contrast": float(hard_values.mean() - easy_values.mean()),
+        "cluster_bootstrap_contrast_ci95": [
+            float(np.nanquantile(contrast_draws, 0.025)),
+            float(np.nanquantile(contrast_draws, 0.975)),
+        ],
+        "hard_transitions": transition_summary(hard_records),
+        "easy_transitions": transition_summary(easy_records),
+    }
+
+
 def summarize(combined_path, bootstrap, seed):
     base_nll = []
     benefit = []
@@ -435,6 +481,12 @@ def summarize(combined_path, bootstrap, seed):
 
     base_nll_array = np.asarray(base_nll, dtype=np.float64)
     benefit_array = np.asarray(benefit, dtype=np.float64)
+    base_entropy_array = np.asarray(
+        [record["base_entropy"] for record in records], dtype=np.float64
+    )
+    base_top1_wrong = np.asarray(
+        [not record["base_top1_correct"] for record in records], dtype=bool
+    )
     sample_positions = {}
     relative_positions = np.empty(len(records), dtype=np.float64)
     for record_index, record in enumerate(records):
@@ -511,33 +563,30 @@ def summarize(combined_path, bootstrap, seed):
         for indices in sample_positions.values()
     ])
 
-    cluster_tail_sums = np.zeros((len(unique_samples), 2), dtype=np.float64)
-    cluster_tail_counts = np.zeros((len(unique_samples), 2), dtype=np.int64)
-    for record_index, record in enumerate(records):
-        row = sample_index[record["sample_id"]]
-        group = int(tail_mask[record_index])
-        cluster_tail_sums[row, group] += record["cera_benefit"]
-        cluster_tail_counts[row, group] += 1
-    tail_contrast_draws = np.full(bootstrap, np.nan, dtype=np.float64)
-    for draw in range(bootstrap):
-        selected = rng.integers(0, len(unique_samples), size=len(unique_samples))
-        sums = cluster_tail_sums[selected].sum(axis=0)
-        counts = cluster_tail_counts[selected].sum(axis=0)
-        if np.all(counts > 0):
-            tail_contrast_draws[draw] = sums[1] / counts[1] - sums[0] / counts[0]
+    nll_contrast = group_contrast_summary(
+        records, tail_mask, unique_samples, sample_index, bootstrap, seed + 1
+    )
+    entropy_threshold = float(np.quantile(base_entropy_array, 0.8))
+    entropy_contrast = group_contrast_summary(
+        records, base_entropy_array >= entropy_threshold, unique_samples,
+        sample_index, bootstrap, seed + 2,
+    )
+    top1_contrast = group_contrast_summary(
+        records, base_top1_wrong, unique_samples, sample_index, bootstrap, seed + 3
+    )
 
     absolute_order = np.argsort(np.abs(benefit_array))[::-1]
     top_one_percent = max(1, int(np.ceil(len(records) * 0.01)))
     absolute_total = np.abs(benefit_array).sum()
-    tail_records = [record for record, is_tail in zip(records, tail_mask) if is_tail]
-    rest_records = [record for record, is_tail in zip(records, tail_mask) if not is_tail]
     tail_values = benefit_array[tail_mask]
-    rest_values = benefit_array[~tail_mask]
     signed_total = benefit_array.sum()
     return {
         "n_samples": len(unique_samples),
         "n_tokens": len(records),
         "spearman_base_nll_vs_cera_benefit": correlation,
+        "spearman_base_entropy_vs_cera_benefit": float(np.corrcoef(
+            rank_values(base_entropy_array), rank_values(benefit_array)
+        )[0, 1]),
         "spearman_base_nll_vs_response_position": float(np.corrcoef(
             rank_values(base_nll_array), rank_values(relative_positions)
         )[0, 1]),
@@ -567,17 +616,21 @@ def summarize(combined_path, bootstrap, seed):
         },
         "hardest_20pct_vs_rest": {
             "base_nll_threshold": float(boundaries[8]),
-            "tail_n_tokens": int(tail_mask.sum()),
-            "rest_n_tokens": int((~tail_mask).sum()),
-            "tail_cera_benefit_mean": float(tail_values.mean()),
-            "rest_cera_benefit_mean": float(rest_values.mean()),
-            "mean_contrast": float(tail_values.mean() - rest_values.mean()),
-            "cluster_bootstrap_contrast_ci95": [
-                float(np.nanquantile(tail_contrast_draws, 0.025)),
-                float(np.nanquantile(tail_contrast_draws, 0.975)),
-            ],
-            "tail_transitions": transition_summary(tail_records),
-            "rest_transitions": transition_summary(rest_records),
+            "tail_n_tokens": nll_contrast["hard_n_tokens"],
+            "rest_n_tokens": nll_contrast["easy_n_tokens"],
+            "tail_cera_benefit_mean": nll_contrast["hard_cera_benefit_mean"],
+            "rest_cera_benefit_mean": nll_contrast["easy_cera_benefit_mean"],
+            "tail_transitions": nll_contrast["hard_transitions"],
+            "rest_transitions": nll_contrast["easy_transitions"],
+            **nll_contrast,
+        },
+        "highest_entropy_20pct_vs_rest": {
+            "base_entropy_threshold": entropy_threshold,
+            **entropy_contrast,
+        },
+        "base_top1_mismatch_vs_correct": {
+            "hard_definition": "frozen base top-1 prediction differs from gold token",
+            **top1_contrast,
         },
         "difficulty_boundaries": boundaries.tolist(),
         "bins": bin_rows,
