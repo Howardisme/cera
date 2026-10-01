@@ -386,7 +386,11 @@ def exact_mcnemar(lora_wrong_cera_correct, lora_correct_cera_wrong):
         return 1.0
     smaller = min(lora_wrong_cera_correct, lora_correct_cera_wrong)
     tail = sum(math.comb(discordant, index) for index in range(smaller + 1))
-    return min(1.0, 2.0 * tail / (2 ** discordant))
+    if tail >= 2 ** (discordant - 1):
+        return 1.0
+    numerator = 2 * tail
+    shift = max(0, numerator.bit_length() - 53)
+    return math.ldexp(float(numerator >> shift), shift - discordant)
 
 
 def partial_rank_correlation(first, second, control):
