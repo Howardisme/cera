@@ -35,7 +35,8 @@ def adapter_manifest(model):
 
 
 def validate_cera_config(config):
-    if config.get("cera_format_version") not in (1, 2, 3) or config.get("rank_mode") != "fixed":
+    format_version = config.get("cera_format_version")
+    if format_version not in (1, 2, 3, 4) or config.get("rank_mode") != "fixed":
         raise ValueError("Unsupported CeRA checkpoint format or rank mode.")
     variant = config.get("cera_variant", "legacy")
     if variant not in ("legacy", "peft_aligned"):
@@ -61,6 +62,21 @@ def validate_cera_config(config):
                     abs_tol=1e-12,
                 )):
             raise ValueError("Unsupported recurrent CeRA architecture metadata.")
+    mix_mode = config.get("cera_mix_mode", "pure")
+    if mix_mode not in ("pure", "learned_mix"):
+        raise ValueError("Unsupported CeRA mix mode.")
+    if mix_mode == "learned_mix":
+        if (format_version != 4 or variant != "peft_aligned"
+                or config.get("act_fn") != "silu" or recurrent_steps != 0):
+            raise ValueError("Learned-mix CeRA requires format version 4 and aligned SiLU semantics.")
+        if (not isinstance(config.get("gamma_init"), (int, float))
+                or not math.isfinite(config["gamma_init"])
+                or config.get("gamma_granularity") != "per_adapter_module"
+                or config.get("gamma_parameterization") != "unconstrained_scalar"
+                or config.get("mix_formula") != "linear_silu_interpolation"):
+            raise ValueError("Unsupported learned-mix CeRA metadata.")
+    elif format_version == 4:
+        raise ValueError("CeRA checkpoint format version 4 requires learned_mix mode.")
     if config.get("adapter_dtype") not in ("float32", "bfloat16", "float16"):
         raise ValueError("Invalid CeRA adapter dtype.")
     if config.get("model_type") != "CeRA" or config.get("rank", 0) < 1:
@@ -91,6 +107,8 @@ def restore_cera(model, checkpoint, *, rank, dropout, act_fn, target_modules):
             adapter_dtype=getattr(torch, config["adapter_dtype"]),
             variant=config.get("cera_variant", "legacy"), alpha=config.get("alpha"),
             recurrent_steps=config.get("recurrent_steps", 0),
+            mix_mode=config.get("cera_mix_mode", "pure"),
+            gamma_init=config.get("gamma_init", 0.0),
         )
     else:
         model = apply_cera(
@@ -108,6 +126,7 @@ def validate_cera_budget(model, rank, expected_projections):
     expected = sum(
         rank * (module.original_layer.in_features + module.original_layer.out_features)
         + (2 * rank * rank if module.cera.recurrent_steps else 0)
+        + (1 if module.cera.mix_mode == "learned_mix" else 0)
         for module in wrappers
     )
     actual = sum(param.numel() for param in model.parameters() if param.requires_grad)
@@ -117,6 +136,8 @@ def validate_cera_budget(model, rank, expected_projections):
                 module.cera.recurrent_inner.in_features != rank
                 or module.cera.recurrent_outer.out_features != rank
                 or module.cera.recurrent_norm.elementwise_affine
-            ) for module in wrappers)):
+            ) for module in wrappers)
+            or any(module.cera.mix_mode == "learned_mix" and module.cera.gamma.numel() != 1
+                   for module in wrappers)):
         raise ValueError(f"CeRA budget mismatch: expected={expected}, actual={actual}")
     return actual

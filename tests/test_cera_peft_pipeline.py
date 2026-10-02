@@ -12,7 +12,13 @@ import torch
 from torch import nn
 
 from cera.adapters import CeRAWrapper, apply_cera
-from cera.peft_pipeline import load_cera_weights, peft_adapter_dtype, restore_cera
+from cera.peft_pipeline import (
+    load_cera_weights,
+    peft_adapter_dtype,
+    restore_cera,
+    validate_cera_budget,
+    validate_cera_config,
+)
 from cera.trainer import save_checkpoint
 
 
@@ -336,6 +342,58 @@ class InjectionTests(unittest.TestCase):
             restored.model.layers[0].mlp["down_proj"](inputs),
         )
 
+    def test_learned_mix_checkpoint_round_trip_and_metadata(self):
+        base = tiny_model()
+        model = apply_cera(
+            copy.deepcopy(base), rank=2, dropout=0, act_fn="silu",
+            target_modules=TARGETS, variant="peft_aligned", alpha=2,
+            mix_mode="learned_mix", gamma_init=0,
+        )
+        wrappers = [module for module in model.modules() if isinstance(module, CeRAWrapper)]
+        with torch.no_grad():
+            for index, module in enumerate(wrappers):
+                nn.init.normal_(module.cera.B.weight)
+                module.cera.gamma.fill_(index / 10)
+        expected_budget = sum(
+            2 * (module.original_layer.in_features + module.original_layer.out_features) + 1
+            for module in wrappers
+        )
+        self.assertEqual(validate_cera_budget(model, 2, len(TARGETS)), expected_budget)
+        config = dict(
+            cera_format_version=4, rank_mode="fixed", model_type="CeRA",
+            scale=1.0, alpha=2, rank=2, dropout=0.0, act_fn="silu",
+            adapter_dtype="float32", target_modules=",".join(TARGETS),
+            cera_variant="peft_aligned", recurrent_steps=0,
+            cera_mix_mode="learned_mix", gamma_init=0.0,
+            gamma_granularity="per_adapter_module",
+            gamma_parameterization="unconstrained_scalar",
+            mix_formula="linear_silu_interpolation",
+        )
+        directory = tempfile.mkdtemp(prefix="cera-mix-checkpoint-test-")
+        save_checkpoint(model, 1, 64, {}, directory, "CeRA", config=config)
+        checkpoint = torch.load(Path(directory) / "cera_ckpt_64.pt", weights_only=True)
+        restored = restore_cera(
+            copy.deepcopy(base), checkpoint, rank=2, dropout=0,
+            act_fn="silu", target_modules=TARGETS,
+        )
+        model.eval()
+        restored.eval()
+        inputs = torch.randn(3, 28)
+        torch.testing.assert_close(
+            model.model.layers[0].mlp["down_proj"](inputs),
+            restored.model.layers[0].mlp["down_proj"](inputs),
+        )
+        self.assertEqual(
+            [module.cera.gamma.item() for module in wrappers],
+            [module.cera.gamma.item() for module in restored.modules()
+             if isinstance(module, CeRAWrapper)],
+        )
+
+        invalid_config = dict(config)
+        invalid_config.pop("gamma_granularity")
+        with self.assertRaisesRegex(ValueError, "learned-mix CeRA metadata"):
+            validate_cera_config(invalid_config)
+
     def test_evaluation_loader_reconstructs_logits_and_rejects_conflict(self):
         import evaluate
         from transformers import LlamaConfig, LlamaForCausalLM
@@ -379,7 +437,8 @@ class InjectionTests(unittest.TestCase):
                       dropout=0.1, model="test/tiny", seed=42, cera_format_version=1,
                       act_fn="silu", target_modules=",".join(TARGETS))
         command = [sys.executable, "-c", source, "CeRA", "metamathqa", "64", "1e-4", "0.1",
-                   "test/tiny", "64", ",".join(TARGETS), "42", "silu", "legacy", "0"]
+                   "test/tiny", "64", ",".join(TARGETS), "42", "silu", "legacy", "0",
+                   "pure", "0.0"]
         for index in range(2):
             output = directory / "results" / f"Exp_PEFT_CeRA_test_{index}" / "CeRA"
             output.mkdir(parents=True)
@@ -393,6 +452,82 @@ class InjectionTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("found 2", result.stderr)
         print(f"[TEST ARTIFACT] {directory}")
+
+    def test_checkpoint_selection_distinguishes_learned_mix(self):
+        script = Path(__file__).resolve().parents[1] / "slurm/run_eval_peft.sh"
+        source = script.read_text().split("<<'PYSELECT'\n", 1)[1].split("\nPYSELECT", 1)[0]
+        directory = Path(tempfile.mkdtemp(prefix="cera-mix-selection-test-"))
+        common = dict(
+            model_type="CeRA", dataset="metamathqa", rank=64, lr=1e-4,
+            dropout=0.0, model="test/tiny", seed=42, act_fn="silu", alpha=64,
+            target_modules="q_proj,v_proj", cera_variant="peft_aligned",
+            recurrent_steps=0,
+        )
+        for mix_mode in ("pure", "learned_mix"):
+            output = directory / "results" / f"Exp_PEFT_CeRA_{mix_mode}" / "CeRA"
+            output.mkdir(parents=True)
+            config = dict(common, cera_mix_mode=mix_mode, gamma_init=0.0)
+            (output / "CeRA_log.json").write_text(json.dumps({"config": config}))
+            (output / "cera_ckpt_best_1.pt").touch()
+        command = [
+            sys.executable, "-c", source, "CeRA", "metamathqa", "64", "1e-4", "0.0",
+            "test/tiny", "64", "q_proj,v_proj", "42", "silu", "peft_aligned", "0",
+            "learned_mix", "0.0",
+        ]
+        result = subprocess.run(command, cwd=directory, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("Exp_PEFT_CeRA_learned_mix", result.stdout)
+
+    def test_explicit_checkpoint_canonicalizes_mix_metadata(self):
+        script = Path(__file__).resolve().parents[1] / "slurm/run_eval_peft.sh"
+        source = script.read_text().split("<<'PYMETADATA'\n", 1)[1].split(
+            "\nPYMETADATA", 1
+        )[0]
+        directory = Path(tempfile.mkdtemp(prefix="cera-mix-metadata-test-"))
+        config = dict(
+            cera_format_version=4, rank_mode="fixed", model_type="CeRA",
+            model="test/checkpoint-model", scale=1.0, alpha=2, rank=2,
+            dropout=0.0, act_fn="silu", adapter_dtype="float32",
+            target_modules="q_proj,v_proj", cera_variant="peft_aligned",
+            recurrent_steps=0, cera_mix_mode="learned_mix", gamma_init=0.0,
+            gamma_granularity="per_adapter_module",
+            gamma_parameterization="unconstrained_scalar",
+            mix_formula="linear_silu_interpolation",
+        )
+        checkpoint_path = directory / "cera_ckpt_best_1.pt"
+        torch.save({"config": config}, checkpoint_path)
+        command = [
+            sys.executable, "-c", source, str(checkpoint_path),
+            "wrong/model", "64", "0.1", "all_linear", "identity", "legacy",
+            "3", "pure", "1.0", "64",
+        ]
+        result = subprocess.run(command, cwd=script.parents[1], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            result.stdout.strip().split("\t"),
+            [
+                "test/checkpoint-model", "2", "0.0", "q_proj,v_proj", "silu",
+                "peft_aligned", "0", "learned_mix", "0.0", "2",
+            ],
+        )
+
+        pure_config = dict(config)
+        pure_config.update(cera_format_version=2, act_fn="identity")
+        for key in (
+            "cera_mix_mode", "gamma_init", "gamma_granularity",
+            "gamma_parameterization", "mix_formula",
+        ):
+            pure_config.pop(key, None)
+        pure_checkpoint_path = directory / "cera_ckpt_best_2.pt"
+        torch.save({"config": pure_config}, pure_checkpoint_path)
+        pure_command = list(command)
+        pure_command[3] = str(pure_checkpoint_path)
+        pure_result = subprocess.run(
+            pure_command, cwd=script.parents[1], capture_output=True, text=True
+        )
+        self.assertEqual(pure_result.returncode, 0, pure_result.stderr)
+        pure_fields = pure_result.stdout.strip().split("\t")
+        self.assertEqual(pure_fields[7:9], ["pure", "0.0"])
 
 
 if __name__ == "__main__":

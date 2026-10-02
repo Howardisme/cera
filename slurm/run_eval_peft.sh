@@ -39,6 +39,8 @@ CHECKPOINT=${12:-${CHECKPOINT_PATH:-}}
 ACT_FN=${ACT_FN:-silu}
 CERA_VARIANT=${CERA_VARIANT:-legacy}
 RECURRENT_STEPS=${RECURRENT_STEPS:-0}
+CERA_MIX_MODE=${CERA_MIX_MODE:-pure}
+GAMMA_INIT=${GAMMA_INIT:-0.0}
 ADAPTER_FORMAT=peft
 
 if [ "$TARGET_MODULES" = "all_linear" ]; then
@@ -79,12 +81,12 @@ case "$LR" in
 esac
 
 if [ -z "$CHECKPOINT" ]; then
-    CHECKPOINT=$(python3 - "$METHOD" "$DATASET" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" "$ALPHA" "$TARGET_MODULES" "$SEED" "$ACT_FN" "$CERA_VARIANT" "$RECURRENT_STEPS" <<'PYSELECT'
+    CHECKPOINT=$(python3 - "$METHOD" "$DATASET" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" "$ALPHA" "$TARGET_MODULES" "$SEED" "$ACT_FN" "$CERA_VARIANT" "$RECURRENT_STEPS" "$CERA_MIX_MODE" "$GAMMA_INIT" <<'PYSELECT'
 import json
 import sys
 from pathlib import Path
 
-method, dataset, rank, lr, dropout, base, alpha, targets, seed, activation, variant, recurrent_steps = sys.argv[1:]
+method, dataset, rank, lr, dropout, base, alpha, targets, seed, activation, variant, recurrent_steps, mix_mode, gamma_init = sys.argv[1:]
 expected = dict(model_type=method, dataset=dataset, rank=int(rank), lr=float(lr),
                 dropout=float(dropout), model=base, seed=int(seed))
 matches = []
@@ -98,6 +100,8 @@ for log_path in Path("results").glob(f"Exp_PEFT_{method}_*/{method}/{method}_log
         if (config.get("act_fn") != activation
                 or config.get("cera_variant", "legacy") != variant
                 or config.get("recurrent_steps", 0) != int(recurrent_steps)
+                or config.get("cera_mix_mode", "pure") != mix_mode
+                or (mix_mode == "learned_mix" and config.get("gamma_init") != float(gamma_init))
                 or (variant == "peft_aligned" and config.get("alpha") != int(alpha))):
             continue
         pattern = "cera_ckpt_best_*.pt"
@@ -116,6 +120,58 @@ if [ ! -e "$CHECKPOINT" ]; then
     echo "[ERROR] Checkpoint does not exist: $CHECKPOINT"
     exit 1
 fi
+if [ "$METHOD" = "CeRA" ] && [[ "$CHECKPOINT" != *.pt || ! -f "$CHECKPOINT" ]]; then
+    echo "[ERROR] CeRA requires a .pt checkpoint, not: $CHECKPOINT"
+    exit 1
+fi
+if [ "$METHOD" = "CeRA" ]; then
+    CHECKPOINT_META=$(singularity exec -B /work \
+        --env PYTHONPATH="$PYPKGS" \
+        --env PYTHONNOUSERSITE=1 \
+        "$SIF" \
+        python - "$CHECKPOINT" "$BASE_MODEL" "$RANK" "$DROPOUT" "$TARGET_MODULES" \
+            "$ACT_FN" "$CERA_VARIANT" "$RECURRENT_STEPS" "$CERA_MIX_MODE" \
+            "$GAMMA_INIT" "$ALPHA" <<'PYMETADATA'
+import sys
+
+import torch
+
+from cera.peft_pipeline import validate_cera_config
+
+checkpoint_path, *fallback = sys.argv[1:]
+checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+config = checkpoint.get("config")
+if not isinstance(config, dict):
+    raise ValueError("CeRA checkpoint is missing architecture metadata.")
+validate_cera_config(config)
+
+keys = (
+    "model", "rank", "dropout", "target_modules", "act_fn", "cera_variant",
+    "recurrent_steps", "cera_mix_mode", "gamma_init", "alpha",
+)
+defaults = dict(zip(keys, fallback))
+schema_defaults = {
+    "cera_variant": "legacy",
+    "recurrent_steps": 0,
+    "cera_mix_mode": "pure",
+    "gamma_init": 0.0,
+}
+values = []
+for key in keys:
+    value = config.get(key)
+    if value is None:
+        value = schema_defaults.get(key, defaults[key])
+    text = str(value)
+    if "\t" in text or "\n" in text:
+        raise ValueError(f"Invalid control character in CeRA metadata field {key}.")
+    values.append(text)
+print("\t".join(values))
+PYMETADATA
+    )
+    IFS=$'\t' read -r BASE_MODEL RANK DROPOUT TARGET_MODULES ACT_FN CERA_VARIANT \
+        RECURRENT_STEPS CERA_MIX_MODE GAMMA_INIT ALPHA <<< "$CHECKPOINT_META"
+    echo "[INFO] Canonicalized CeRA architecture from checkpoint metadata."
+fi
 RESULTS_DIR=$(dirname "$(dirname "$CHECKPOINT")")
 
 REP_PENALTY=${REP_PENALTY:-1.0}
@@ -128,16 +184,17 @@ OUT_DIR="${OUTPUT_DIR}/${CELL_ID}"
 export OUT_DIR_PY="$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-python3 - "$OUT_DIR" "$CHECKPOINT" "$BASE_MODEL" "$RANK" "$DROPOUT" "$TARGET_MODULES" "$ACT_FN" "$REP_PENALTY" "$ADAPTER_FORMAT" <<'PYREQUEST'
+python3 - "$OUT_DIR" "$CHECKPOINT" "$BASE_MODEL" "$RANK" "$DROPOUT" "$TARGET_MODULES" "$ACT_FN" "$REP_PENALTY" "$ADAPTER_FORMAT" "$CERA_MIX_MODE" "$GAMMA_INIT" <<'PYREQUEST'
 import json
 import sys
 from pathlib import Path
 
-out_dir, checkpoint, base, rank, dropout, targets, activation, penalty, adapter_format = sys.argv[1:]
+out_dir, checkpoint, base, rank, dropout, targets, activation, penalty, adapter_format, mix_mode, gamma_init = sys.argv[1:]
 root = Path(out_dir)
 record = dict(checkpoint=str(Path(checkpoint).resolve()), base_model=base,
               rank=int(rank), dropout=float(dropout), targets=sorted(targets.split(",")),
               activation=activation, repetition_penalty=float(penalty), adapter_format=adapter_format,
+              cera_mix_mode=mix_mode, gamma_init=float(gamma_init),
               max_new_tokens=1024, num_samples_per_problem=1, batch_size=4)
 manifest = root / "evaluation_request.json"
 if manifest.exists():
@@ -151,8 +208,9 @@ PYREQUEST
 START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 echo "[START] eval-peft | cell=${CELL_ID} method=${METHOD} rank=${RANK} lr=${LR} A=${ALPHA}"
 echo "  Results dir : ${RESULTS_DIR}"
-echo "  PEFT adapter: ${CHECKPOINT}"
+echo "  Checkpoint  : ${CHECKPOINT}"
 echo "  Output dir  : ${OUT_DIR}"
+echo "  Mix mode    : ${CERA_MIX_MODE} (gamma_init=${GAMMA_INIT})"
 
 # ── 1. MATH-500 pass@1 ────────────────────────────────────────────────────────
 if [ ! -f "${OUT_DIR}/math500_pass1.json" ]; then
@@ -370,6 +428,8 @@ meta = {
     "adapter_format":   "${ADAPTER_FORMAT}",
     "target_modules":   "${TARGET_MODULES}",
     "activation":       "${ACT_FN}",
+    "cera_mix_mode":    "${CERA_MIX_MODE}",
+    "gamma_init":       float("${GAMMA_INIT}"),
     "rank":             int("${RANK}"),
     "method":           "${METHOD}",
     "lr":               "${LR}",

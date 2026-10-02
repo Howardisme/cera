@@ -311,6 +311,9 @@ class ForgettingEvalCallback(TrainerCallback):
             },
             "orig_task_general": {"test_loss": lo_or, "test_ppl": pp_or},
         }
+        gamma_diagnostics = _gamma_diagnostics(self.model)
+        if gamma_diagnostics is not None:
+            record["gamma_diagnostics"] = gamma_diagnostics
         self.log["history"].append(record)
         save_logs(self.log, self.save_dir, self.model_type)
         print(f"  target_ppl={pp_te:.2f} | general_ppl={pp_or:.2f}")
@@ -367,6 +370,39 @@ class ForgettingEvalCallback(TrainerCallback):
                 self._run_and_log(state, size)
 
 
+def _gamma_diagnostics(model):
+    values = {
+        name: float(param.detach().cpu())
+        for name, param in model.named_parameters()
+        if name.endswith(".cera.gamma")
+    }
+    if not values:
+        return None
+    array = np.asarray(list(values.values()), dtype=np.float64)
+    by_projection = {}
+    for projection in ("q_proj", "v_proj"):
+        selected = np.asarray(
+            [value for name, value in values.items() if f".{projection}." in name],
+            dtype=np.float64,
+        )
+        if selected.size:
+            by_projection[projection] = {
+                "count": int(selected.size),
+                "mean": float(selected.mean()),
+                "abs_mean": float(np.abs(selected).mean()),
+            }
+    return {
+        "count": int(array.size),
+        "mean": float(array.mean()),
+        "median": float(np.median(array)),
+        "min": float(array.min()),
+        "max": float(array.max()),
+        "abs_mean": float(np.abs(array).mean()),
+        "by_projection": by_projection,
+        "values": values,
+    }
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -395,6 +431,10 @@ def parse_args() -> argparse.Namespace:
                    help="CeRA implementation; legacy preserves existing checkpoints.")
     p.add_argument("--recurrent_steps", type=int, default=0,
                    help="Shared rank-space correction steps; PEFT-aligned identity CeRA only.")
+    p.add_argument("--cera_mix_mode", choices=["pure", "learned_mix"], default="pure",
+                   help="CeRA bottleneck activation mode; learned_mix interpolates Identity and SiLU.")
+    p.add_argument("--gamma_init", type=float, default=0.0,
+                   help="Initial per-adapter mixing scalar for learned_mix CeRA.")
     p.add_argument("--target_modules", default="q_proj,k_proj,v_proj,o_proj,"
                                                 "gate_proj,up_proj,down_proj",
                    help="Comma-separated target projections (default: all_linear).")
@@ -432,6 +472,15 @@ def parse_args() -> argparse.Namespace:
         or args.act_fn != "identity"
     ):
         p.error("Recurrent steps require PEFT-aligned CeRA with identity activation.")
+    if not np.isfinite(args.gamma_init):
+        p.error("Require finite gamma_init.")
+    if args.cera_mix_mode == "learned_mix" and (
+        args.model_type != "CeRA"
+        or args.cera_variant != "peft_aligned"
+        or args.act_fn != "silu"
+        or args.recurrent_steps != 0
+    ):
+        p.error("learned_mix requires non-recurrent PEFT-aligned CeRA with SiLU activation.")
     return args
 
 
@@ -487,9 +536,10 @@ def main():
         else ""
     )
     recurrent_suffix = f"_K{args.recurrent_steps}" if args.recurrent_steps else ""
+    mix_suffix = f"_MixG{args.gamma_init:g}" if args.cera_mix_mode == "learned_mix" else ""
     exp_name  = (
         f"Exp_PEFT_{args.model_type}_{args.dataset}"
-        f"_R{args.rank}_lr{args.lr}_{args.act_fn}{variant_suffix}{recurrent_suffix}_{tgt_str}"
+        f"_R{args.rank}_lr{args.lr}_{args.act_fn}{variant_suffix}{recurrent_suffix}{mix_suffix}_{tgt_str}"
         f"_D{args.dropout}_E{args.epochs}{alpha_suffix}{seed_suffix}{model_suffix}_{timestamp}"
     )
     smoke_run = args.max_steps > 0 or args.max_train_samples < 100_000 or args.eval_batches < 200
@@ -512,7 +562,8 @@ def main():
           f"dataset={args.dataset} | rank={args.rank} | alpha={args.alpha} | "
           f"lr={args.lr} | dropout={args.dropout} | act_fn={args.act_fn} | "
             f"cera_variant={args.cera_variant} | "
-                    f"recurrent_steps={args.recurrent_steps} | "
+                    f"recurrent_steps={args.recurrent_steps} | mix_mode={args.cera_mix_mode} | "
+                    f"gamma_init={args.gamma_init} | "
           f"targets={target_modules} | epochs={args.epochs} | seed={args.seed}")
 
     # -- Tokenizer ------------------------------------------------------------
@@ -563,6 +614,8 @@ def main():
             variant        = args.cera_variant,
             alpha          = args.alpha,
             recurrent_steps= args.recurrent_steps,
+            mix_mode       = args.cera_mix_mode,
+            gamma_init     = args.gamma_init,
         )
         count = validate_cera_budget(model, args.rank, len(model.model.layers) * len(target_modules))
         cera_scale = args.alpha / args.rank if args.cera_variant == "peft_aligned" else 1.0
@@ -593,6 +646,8 @@ def main():
         "act_fn":         args.act_fn  if args.model_type == "CeRA" else "linear",
         "cera_variant":   args.cera_variant if args.model_type == "CeRA" else None,
         "recurrent_steps": args.recurrent_steps if args.model_type == "CeRA" else None,
+        "cera_mix_mode": args.cera_mix_mode if args.model_type == "CeRA" else None,
+        "gamma_init": args.gamma_init if args.model_type == "CeRA" else None,
         "alpha":          args.alpha   if args.model_type in ("LoRA", "DoRA") else None,
         "target_modules": args.target_modules,
         "epochs":         args.epochs,
@@ -618,7 +673,8 @@ def main():
                      for name in ("torch", "transformers", "peft", "trl", "accelerate", "datasets")},
     }
     if args.model_type == "CeRA":
-        config.update(cera_format_version=(3 if args.recurrent_steps else 2),
+        config.update(cera_format_version=(4 if args.cera_mix_mode == "learned_mix"
+                                           else 3 if args.recurrent_steps else 2),
                   rank_mode="fixed", scale=cera_scale,
                       alpha=args.alpha,
                       adapter_dtype=str(adapter_dtype).removeprefix("torch."),
@@ -626,6 +682,12 @@ def main():
                                       else "kaiming_normal_A_zero_B"),
                       dropout_position=("input" if args.cera_variant == "peft_aligned"
                                         else "post_activation"))
+        if args.cera_mix_mode == "learned_mix":
+            config.update(
+                gamma_granularity="per_adapter_module",
+                gamma_parameterization="unconstrained_scalar",
+                mix_formula="linear_silu_interpolation",
+            )
         if args.recurrent_steps:
             config.update(
                 recurrent_activation="silu",
@@ -736,6 +798,9 @@ def main():
                               "test_loss":  lo_te, "test_ppl":  pp_te},
         "orig_task_general": {"test_loss":  lo_or, "test_ppl":  pp_or},
     }
+    gamma_diagnostics = _gamma_diagnostics(model)
+    if gamma_diagnostics is not None:
+        baseline["gamma_diagnostics"] = gamma_diagnostics
     callback.log["history"].append(baseline)
     save_logs(callback.log, save_dir, args.model_type)
     print(f"  baseline target_ppl={pp_te:.2f} | general_ppl={pp_or:.2f}")
