@@ -63,6 +63,8 @@ class CeRAAdapter(nn.Module):
         variant: str = "legacy",
         scaling: float = 1.0,
         recurrent_steps: int = 0,
+        mix_mode: str = "pure",
+        gamma_init: float = 0.0,
     ):
         super().__init__()
         hidden_dim = rank if rank is not None else int(input_dim * expansion_factor)
@@ -88,9 +90,24 @@ class CeRAAdapter(nn.Module):
             raise ValueError(f"Unknown CeRA variant {variant!r}.")
         self.variant = variant
         self.scaling = scaling
+        if mix_mode not in {"pure", "learned_mix"}:
+            raise ValueError(f"Unknown CeRA mix mode {mix_mode!r}.")
+        if mix_mode == "learned_mix" and (variant != "peft_aligned" or act_fn != "silu"):
+            raise ValueError(
+                "Learned-mix CeRA requires variant='peft_aligned' and act_fn='silu'."
+            )
+        if not math.isfinite(gamma_init):
+            raise ValueError("CeRA gamma_init must be finite.")
+        self.mix_mode = mix_mode
+        if mix_mode == "learned_mix":
+            self.gamma = nn.Parameter(torch.tensor(
+                gamma_init, device=device, dtype=dtype
+            ))
         if recurrent_steps < 0:
             raise ValueError("CeRA recurrent_steps must be nonnegative.")
-        if recurrent_steps and (variant != "peft_aligned" or act_fn != "identity"):
+        if recurrent_steps and (
+            variant != "peft_aligned" or act_fn != "identity" or mix_mode != "pure"
+        ):
             raise ValueError(
                 "Recurrent CeRA requires variant='peft_aligned' and act_fn='identity'."
             )
@@ -142,7 +159,11 @@ class CeRAAdapter(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.to(self.A.weight.dtype)
         if self.variant == "peft_aligned":
-            state = self.act_fn(self.A(self.dropout(x)))
+            projected = self.A(self.dropout(x))
+            if self.mix_mode == "learned_mix":
+                state = projected + self.gamma * (self.act_fn(projected) - projected)
+            else:
+                state = self.act_fn(projected)
             for _ in range(self.recurrent_steps):
                 update = self.recurrent_outer(
                     F.silu(self.recurrent_inner(self.recurrent_norm(state)))
@@ -179,6 +200,8 @@ class CeRAWrapper(nn.Module):
         variant: str = "legacy",
         scaling: float = 1.0,
         recurrent_steps: int = 0,
+        mix_mode: str = "pure",
+        gamma_init: float = 0.0,
     ):
         super().__init__()
         self.original_layer = original_layer
@@ -197,6 +220,8 @@ class CeRAWrapper(nn.Module):
             variant=variant,
             scaling=scaling,
             recurrent_steps=recurrent_steps,
+            mix_mode=mix_mode,
+            gamma_init=gamma_init,
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -344,6 +369,8 @@ def apply_cera(
     variant: str = "legacy",
     alpha: Optional[int] = None,
     recurrent_steps: int = 0,
+    mix_mode: str = "pure",
+    gamma_init: float = 0.0,
 ) -> nn.Module:
     """
     Inject CeRA adapters into self-attention projections of a Llama model.
@@ -372,6 +399,15 @@ def apply_cera(
     if recurrent_steps and (variant != "peft_aligned" or act_fn != "identity"):
         raise ValueError(
             "Recurrent CeRA requires variant='peft_aligned' and act_fn='identity'."
+        )
+    if mix_mode not in {"pure", "learned_mix"}:
+        raise ValueError(f"Unknown CeRA mix mode {mix_mode!r}.")
+    if mix_mode == "learned_mix" and (
+        variant != "peft_aligned" or act_fn != "silu" or recurrent_steps
+    ):
+        raise ValueError(
+            "Learned-mix CeRA requires non-recurrent variant='peft_aligned' "
+            "with act_fn='silu'."
         )
     scaling = (alpha if alpha is not None else rank) / rank if rank is not None else 1.0
 
@@ -406,10 +442,11 @@ def apply_cera(
                 module, module.in_features, module.out_features, expansion_factor,
                 dropout=dropout, act_fn=act_fn, rank=rank, adapter_dtype=adapter_dtype,
                 variant=variant, scaling=scaling, recurrent_steps=recurrent_steps,
+                mix_mode=mix_mode, gamma_init=gamma_init,
             ))
         print(
             f"[INFO] Applied fixed-rank CeRA | rank={rank} | variant={variant} | "
-            f"scale={scaling} | recurrent_steps={recurrent_steps} | "
+            f"scale={scaling} | recurrent_steps={recurrent_steps} | mix_mode={mix_mode} | "
             f"projections={len(replacements)}"
         )
         return model
