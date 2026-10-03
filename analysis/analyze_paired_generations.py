@@ -17,7 +17,7 @@ import json
 import random
 import statistics
 from collections import Counter
-from math import comb
+from math import comb, ldexp
 from pathlib import Path
 
 from regrade_community import _HAVE_MV, extract, grade
@@ -107,7 +107,11 @@ def exact_mcnemar(cera_only, lora_only):
     if discordant == 0:
         return 1.0
     tail = sum(comb(discordant, index) for index in range(min(cera_only, lora_only) + 1))
-    return min(1.0, 2.0 * tail / (2**discordant))
+    if tail >= 2 ** (discordant - 1):
+        return 1.0
+    numerator = 2 * tail
+    shift = max(0, numerator.bit_length() - 53)
+    return ldexp(float(numerator >> shift), shift - discordant)
 
 
 def percentile(values, probability):
