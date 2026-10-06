@@ -41,6 +41,8 @@ CERA_VARIANT=${CERA_VARIANT:-legacy}
 RECURRENT_STEPS=${RECURRENT_STEPS:-0}
 CERA_MIX_MODE=${CERA_MIX_MODE:-pure}
 GAMMA_INIT=${GAMMA_INIT:-0.0}
+GAMMA_INTERVENTION=${GAMMA_INTERVENTION:-learned}
+GAMMA_SHUFFLE_SEED=${GAMMA_SHUFFLE_SEED:-20261006}
 ADAPTER_FORMAT=peft
 
 if [ "$TARGET_MODULES" = "all_linear" ]; then
@@ -184,17 +186,19 @@ OUT_DIR="${OUTPUT_DIR}/${CELL_ID}"
 export OUT_DIR_PY="$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-python3 - "$OUT_DIR" "$CHECKPOINT" "$BASE_MODEL" "$RANK" "$DROPOUT" "$TARGET_MODULES" "$ACT_FN" "$REP_PENALTY" "$ADAPTER_FORMAT" "$CERA_MIX_MODE" "$GAMMA_INIT" <<'PYREQUEST'
+python3 - "$OUT_DIR" "$CHECKPOINT" "$BASE_MODEL" "$RANK" "$DROPOUT" "$TARGET_MODULES" "$ACT_FN" "$REP_PENALTY" "$ADAPTER_FORMAT" "$CERA_MIX_MODE" "$GAMMA_INIT" "$GAMMA_INTERVENTION" "$GAMMA_SHUFFLE_SEED" <<'PYREQUEST'
 import json
 import sys
 from pathlib import Path
 
-out_dir, checkpoint, base, rank, dropout, targets, activation, penalty, adapter_format, mix_mode, gamma_init = sys.argv[1:]
+out_dir, checkpoint, base, rank, dropout, targets, activation, penalty, adapter_format, mix_mode, gamma_init, gamma_intervention, gamma_shuffle_seed = sys.argv[1:]
 root = Path(out_dir)
 record = dict(checkpoint=str(Path(checkpoint).resolve()), base_model=base,
               rank=int(rank), dropout=float(dropout), targets=sorted(targets.split(",")),
               activation=activation, repetition_penalty=float(penalty), adapter_format=adapter_format,
               cera_mix_mode=mix_mode, gamma_init=float(gamma_init),
+              gamma_intervention=gamma_intervention,
+              gamma_shuffle_seed=int(gamma_shuffle_seed),
               max_new_tokens=1024, num_samples_per_problem=1, batch_size=4)
 manifest = root / "evaluation_request.json"
 if manifest.exists():
@@ -211,6 +215,7 @@ echo "  Results dir : ${RESULTS_DIR}"
 echo "  Checkpoint  : ${CHECKPOINT}"
 echo "  Output dir  : ${OUT_DIR}"
 echo "  Mix mode    : ${CERA_MIX_MODE} (gamma_init=${GAMMA_INIT})"
+echo "  Gamma mode  : ${GAMMA_INTERVENTION} (shuffle_seed=${GAMMA_SHUFFLE_SEED})"
 
 # ── 1. MATH-500 pass@1 ────────────────────────────────────────────────────────
 if [ ! -f "${OUT_DIR}/math500_pass1.json" ]; then
@@ -235,6 +240,8 @@ if [ ! -f "${OUT_DIR}/math500_pass1.json" ]; then
             --batch_size              4 \
             --max_new_tokens          1024 \
             --target_modules          "$TARGET_MODULES" \
+            --gamma_intervention      "$GAMMA_INTERVENTION" \
+            --gamma_shuffle_seed      "$GAMMA_SHUFFLE_SEED" \
             --repetition_penalty      "$REP_PENALTY" \
             --output_jsonl            "${OUT_DIR}/math500_pass1.jsonl"
 
@@ -337,6 +344,8 @@ if [ ! -f "${OUT_DIR}/gsm8k_pass1.json" ]; then
             --batch_size              4 \
             --max_new_tokens          512 \
             --target_modules          "$TARGET_MODULES" \
+            --gamma_intervention      "$GAMMA_INTERVENTION" \
+            --gamma_shuffle_seed      "$GAMMA_SHUFFLE_SEED" \
             --repetition_penalty      "$REP_PENALTY" \
             --output_jsonl            "${OUT_DIR}/gsm8k_pass1.jsonl"
 
@@ -356,47 +365,9 @@ else
     echo "[SKIP] gsm8k_pass1.json already exists"
 fi
 
-# ── 4. MATH Level 5 pass@1 ────────────────────────────────────────────────────
-if [ ! -f "${OUT_DIR}/math_hard_pass1.json" ]; then
-    echo "[EVAL 4/4] MATH Level 5 pass@1 (greedy, ~1324 problems)..."
-    singularity exec --nv -B /work \
-        --env PYTHONPATH="$PYPKGS" \
-        --env PYTHONNOUSERSITE=1 \
-        --env HF_HOME="$HF_CACHE" \
-        "$SIF" \
-        python evaluate.py \
-            --base_model              "$BASE_MODEL" \
-            --adapter_type            "$METHOD_LOWER" \
-            --adapter_format          "$ADAPTER_FORMAT" \
-            --act_fn                  "$ACT_FN" \
-            --rank                    "$RANK" \
-            --alpha                   "$ALPHA" \
-            --dropout                 "$DROPOUT" \
-            --checkpoint              "$CHECKPOINT" \
-            --dataset                 math_hard \
-            --num_samples_per_problem 1 \
-            --temperature             0 \
-            --batch_size              4 \
-            --max_new_tokens          1024 \
-            --target_modules          "$TARGET_MODULES" \
-            --repetition_penalty      "$REP_PENALTY" \
-            --output_jsonl            "${OUT_DIR}/math_hard_pass1.jsonl"
-
-    python3 - <<'PYEOF'
-import json, os
-out_dir = os.environ["OUT_DIR_PY"]
-with open(f"{out_dir}/math_hard_pass1.jsonl") as fh:
-    records = [json.loads(l) for l in fh]
-n_correct = sum(1 for r in records if r.get("n_correct", 0) > 0)
-n_total = len(records)
-pct = round(100.0 * n_correct / n_total, 2) if n_total > 0 else 0.0
-with open(f"{out_dir}/math_hard_pass1.json", "w") as fh:
-    json.dump({"n_correct": n_correct, "n_total": n_total, "pass1": pct}, fh)
-print(f"[MATH-Hard (Level 5) pass@1] {n_correct}/{n_total} = {pct}%")
-PYEOF
-else
-    echo "[SKIP] math_hard_pass1.json already exists"
-fi
+# MATH-Hard is disabled in the standard evaluation pipeline to reduce GPU time.
+# It remains available for explicit runs via evaluate.py --dataset math_hard.
+echo "[SKIP 4/4] MATH-Hard disabled (run evaluate.py manually if needed)"
 
 # ── 5. cell_metadata.json ─────────────────────────────────────────────────────
 END_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -430,6 +401,8 @@ meta = {
     "activation":       "${ACT_FN}",
     "cera_mix_mode":    "${CERA_MIX_MODE}",
     "gamma_init":       float("${GAMMA_INIT}"),
+    "gamma_intervention": "${GAMMA_INTERVENTION}",
+    "gamma_shuffle_seed": int("${GAMMA_SHUFFLE_SEED}"),
     "rank":             int("${RANK}"),
     "method":           "${METHOD}",
     "lr":               "${LR}",
