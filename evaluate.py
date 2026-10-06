@@ -37,6 +37,7 @@ Example (Pass@10, sampling, MATH):
 import argparse
 import json
 import os
+import random
 import re
 import sys
 from math import comb
@@ -50,7 +51,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from cera.adapters import apply_cera, apply_lora, apply_dora
+from cera.adapters import CeRAWrapper, apply_cera, apply_lora, apply_dora
 from cera.peft_pipeline import restore_cera, validate_cera_config
 
 
@@ -121,6 +122,16 @@ def parse_args() -> argparse.Namespace:
         "--target_modules", default="q_proj,v_proj",
         help="Comma-separated attention projections -- must match training config.",
     )
+    p.add_argument(
+        "--gamma_intervention",
+        choices=("learned", "zero", "mean", "shuffle"),
+        default="learned",
+        help="Post-load intervention on learned-mix CeRA gamma parameters.",
+    )
+    p.add_argument(
+        "--gamma_shuffle_seed", type=int, default=20261006,
+        help="Deterministic seed used only by --gamma_intervention shuffle.",
+    )
 
     # -- Dataset --
     p.add_argument(
@@ -183,6 +194,47 @@ def parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 # Model loading
 # ---------------------------------------------------------------------------
+
+def apply_gamma_intervention(model, mode="learned", shuffle_seed=20261006):
+    named_gammas = sorted(
+        (
+            (name, module.cera.gamma)
+            for name, module in model.named_modules()
+            if isinstance(module, CeRAWrapper) and module.cera.mix_mode == "learned_mix"
+        ),
+        key=lambda item: item[0],
+    )
+    if not named_gammas:
+        if mode == "learned":
+            return None
+        raise ValueError("Gamma intervention requires a learned-mix CeRA checkpoint.")
+
+    original = [float(gamma.detach().cpu()) for _, gamma in named_gammas]
+    if mode == "learned":
+        applied = list(original)
+    elif mode == "zero":
+        applied = [0.0] * len(original)
+    elif mode == "mean":
+        mean = sum(original) / len(original)
+        applied = [mean] * len(original)
+    else:
+        applied = list(original)
+        random.Random(shuffle_seed).shuffle(applied)
+
+    with torch.no_grad():
+        for (_, gamma), value in zip(named_gammas, applied):
+            gamma.fill_(value)
+    summary = {
+        "mode": mode,
+        "shuffle_seed": shuffle_seed if mode == "shuffle" else None,
+        "count": len(applied),
+        "original_mean": sum(original) / len(original),
+        "applied_mean": sum(applied) / len(applied),
+        "applied_min": min(applied),
+        "applied_max": max(applied),
+    }
+    print(f"[INFO] Gamma intervention: {json.dumps(summary, sort_keys=True)}")
+    return summary
 
 def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
     checkpoint = None
@@ -286,6 +338,13 @@ def load_model_with_adapter(args: argparse.Namespace, hf_token: str):
             )
         else:
             print("[INFO] All CeRA adapter weights loaded and validated.")
+
+    if args.adapter_type == "cera":
+        apply_gamma_intervention(
+            model,
+            getattr(args, "gamma_intervention", "learned"),
+            getattr(args, "gamma_shuffle_seed", 20261006),
+        )
 
     model.eval()
     return model, tokenizer

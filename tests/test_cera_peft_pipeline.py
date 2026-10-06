@@ -199,6 +199,60 @@ class InjectionTests(unittest.TestCase):
                 variant="legacy", mix_mode="learned_mix",
             )
 
+    def test_gamma_interventions_preserve_expected_invariants(self):
+        import evaluate
+
+        base = tiny_model()
+        model = apply_cera(
+            copy.deepcopy(base), rank=2, dropout=0, act_fn="silu",
+            target_modules=TARGETS, variant="peft_aligned", alpha=2,
+            mix_mode="learned_mix", gamma_init=0,
+        )
+        named = sorted(
+            (
+                (name, module.cera.gamma)
+                for name, module in model.named_modules()
+                if isinstance(module, CeRAWrapper)
+            ),
+            key=lambda item: item[0],
+        )
+        with torch.no_grad():
+            for index, (_, gamma) in enumerate(named):
+                gamma.fill_(index + 1)
+        original = [gamma.item() for _, gamma in named]
+
+        zero_model = copy.deepcopy(model)
+        zero_summary = evaluate.apply_gamma_intervention(zero_model, "zero")
+        self.assertEqual(zero_summary["count"], len(original))
+        self.assertTrue(all(
+            module.cera.gamma.item() == 0
+            for module in zero_model.modules() if isinstance(module, CeRAWrapper)
+        ))
+
+        mean_model = copy.deepcopy(model)
+        evaluate.apply_gamma_intervention(mean_model, "mean")
+        expected_mean = sum(original) / len(original)
+        self.assertTrue(all(
+            module.cera.gamma.item() == expected_mean
+            for module in mean_model.modules() if isinstance(module, CeRAWrapper)
+        ))
+
+        shuffled_models = [copy.deepcopy(model), copy.deepcopy(model)]
+        shuffled_values = []
+        for shuffled_model in shuffled_models:
+            evaluate.apply_gamma_intervention(shuffled_model, "shuffle", shuffle_seed=17)
+            shuffled_values.append(sorted(
+                (
+                    (name, module.cera.gamma.item())
+                    for name, module in shuffled_model.named_modules()
+                    if isinstance(module, CeRAWrapper)
+                ),
+                key=lambda item: item[0],
+            ))
+        self.assertEqual(shuffled_values[0], shuffled_values[1])
+        self.assertEqual(sorted(value for _, value in shuffled_values[0]), sorted(original))
+        self.assertNotEqual([value for _, value in shuffled_values[0]], original)
+
     def test_fp32_adapter_bf16_base_without_autocast(self):
         base = nn.Linear(8, 8, bias=False, dtype=torch.bfloat16)
         wrapper = CeRAWrapper(base, 8, 8, 0.25, rank=2, adapter_dtype=torch.float32)
