@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
-"""Split the learned-mix correction into gain, offset, and curvature on NLL.
+"""Split the activation correction into gain, offset, and curvature on NLL.
 
-The learned-mix correction of one adapter is c(z) = gamma * (SiLU(z) - z).
+The correction of one adapter is c(z) = gamma * (act(z) - z), with a learned
+gamma for learned-mix checkpoints and gamma = 1 for pure nonlinear checkpoints
+of any activation (where "zero" is the linearized adapter and "affine_*" its
+linear surrogate).
 On a calibration split taken from the training rows we fit, per module,
 
     c(z) ~= C z + b
@@ -56,7 +59,8 @@ PROJECTIONS = ("q_proj", "v_proj", "k_proj", "o_proj", "gate_proj", "up_proj", "
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Gain/offset/curvature interventions on a learned-mix CeRA checkpoint."
+        description="Gain/offset/curvature interventions on a learned-mix or pure "
+                    "nonlinear CeRA checkpoint."
     )
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -147,11 +151,11 @@ def piece_energies(moments, C, b):
     return {"gain": gain, "offset": offset, "residual": max(residual, 0.0)}
 
 
-def substitute_correction(condition, z, gamma, fit):
+def substitute_correction(condition, z, gamma, fit, act=F.silu):
     """Return the term added to z under one intervention."""
     if condition == "zero":
         return torch.zeros_like(z)
-    correction = gamma * (F.silu(z) - z)
+    correction = gamma * (act(z) - z)
     if condition == "full":
         return correction
     kind, level = condition.split("_")
@@ -181,16 +185,22 @@ class InterventionController:
         self.mask = None
         self.enabled = True
         self.adapters = {}
+        self.gammas = {}
         self.fits = {}
         self.handles = []
         for name, module in model.named_modules():
             if not isinstance(module, CeRAWrapper):
                 continue
             adapter = module.cera
-            if (adapter.mix_mode != "learned_mix" or adapter.variant != "peft_aligned"
-                    or adapter.recurrent_steps):
-                raise ValueError(f"{name} is not a non-recurrent learned-mix adapter.")
+            if (adapter.variant != "peft_aligned" or adapter.recurrent_steps
+                    or isinstance(adapter.act_fn, torch.nn.Identity)):
+                raise ValueError(f"{name} is not a non-recurrent peft_aligned nonlinear adapter.")
             self.adapters[name] = adapter
+            # A pure activation is the gamma = 1 endpoint of z + gamma * (act(z) - z).
+            self.gammas[name] = (
+                adapter.gamma.detach() if adapter.mix_mode == "learned_mix"
+                else torch.ones_like(adapter.A.weight[0, 0])
+            )
             self.handles.append(adapter.register_forward_hook(self._hook(name, adapter)))
         if not self.adapters:
             raise ValueError("No CeRA adapters found in model.")
@@ -214,6 +224,9 @@ class InterventionController:
             }
 
     def _hook(self, name, adapter):
+        gamma = self.gammas[name]
+        pure = adapter.mix_mode != "learned_mix"
+
         def replace(_module, inputs, _output):
             if not self.enabled:
                 return None
@@ -222,10 +235,13 @@ class InterventionController:
                 selected = z[self.mask.to(z.device)]
                 if selected.numel():
                     self.collect[name].update(
-                        selected, adapter.gamma * (F.silu(selected) - selected)
+                        selected, gamma * (adapter.act_fn(selected) - selected)
                     )
+            if pure and self.condition == "full":
+                # Same expression as the native forward, so parity stays exact.
+                return adapter.B(adapter.act_fn(z)) * adapter.scaling
             added = substitute_correction(
-                self.condition, z, adapter.gamma, self.fits.get(name)
+                self.condition, z, gamma, self.fits.get(name), adapter.act_fn
             )
             return adapter.B(z + added) * adapter.scaling
         return replace
@@ -266,14 +282,14 @@ def bootstrap_delta(delta_sums, token_counts, draws, rng):
 
 def describe_modules(controller, fits, calibration, heldout):
     rows = []
-    for name, adapter in controller.adapters.items():
+    for name in controller.adapters:
         layer = int(name.split(".layers.", 1)[1].split(".", 1)[0])
         row = {
             "module": name,
             "layer": layer,
             "layer_band": "early" if layer <= 7 else "middle" if layer <= 23 else "late",
             "projection": next(p for p in PROJECTIONS if f".{p}" in name),
-            "gamma": float(adapter.gamma.detach().cpu()),
+            "gamma": float(controller.gammas[name].cpu()),
             "scalar_gain": float(fits[name]["scalar"]["C"][0, 0]),
             "uncentered_scalar_gain": fits[name]["uncentered_scalar"],
             "offset_norm": float(fits[name]["scalar"]["b"].norm()),
@@ -326,8 +342,9 @@ def main():
 
     checkpoint = torch.load(args.checkpoint, map_location="cpu", weights_only=True)
     config = checkpoint.get("config") or {}
-    if config.get("cera_mix_mode") != "learned_mix":
-        raise ValueError("Checkpoint is not learned-mix CeRA.")
+    mix_mode = config.get("cera_mix_mode", "pure")
+    if config.get("act_fn") == "identity" or config.get("cera_variant") != "peft_aligned":
+        raise ValueError("Checkpoint must be a peft_aligned nonlinear CeRA (pure or learned-mix).")
     if config.get("dataset", "metamathqa") != "metamathqa":
         raise ValueError("Splits here assume a MetaMathQA-trained checkpoint.")
     del checkpoint
@@ -438,6 +455,8 @@ def main():
     modules = describe_modules(controller, fits, calibration, heldout)
     summary = {
         "checkpoint": str(args.checkpoint.resolve()),
+        "mix_mode": mix_mode,
+        "act_fn": config["act_fn"],
         "dtype": args.dtype,
         "fit_scope": args.fit_scope,
         "n_calibration": len(calibration_rows),

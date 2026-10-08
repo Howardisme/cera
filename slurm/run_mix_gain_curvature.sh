@@ -9,7 +9,7 @@
 #SBATCH --partition=normal
 
 # Gain / offset / curvature same-checkpoint interventions on held-out NLL
-# for one learned-mix CeRA checkpoint.
+# for one learned-mix or pure nonlinear (peft_aligned) CeRA checkpoint.
 #
 # Usage:
 #   sbatch slurm/run_mix_gain_curvature.sh RUN_ID CHECKPOINT \

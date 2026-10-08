@@ -132,6 +132,64 @@ class HookTests(unittest.TestCase):
             controller.close()
             self.assertTrue(torch.allclose(model(x), native))
 
+    def test_pure_activation_is_the_gamma_one_case(self):
+        for act_name, act in (("silu", F.silu), ("relu", F.relu)):
+            with self.subTest(act_fn=act_name):
+                self._check_pure(act_name, act)
+
+    def _check_pure(self, act_name, act):
+        torch.manual_seed(2)
+
+        class Toy(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.q_proj = CeRAWrapper(
+                    nn.Linear(8, 8, bias=False), 8, 8, 0.5, dropout=0.0, act_fn=act_name,
+                    rank=4, variant="peft_aligned", scaling=2.0, mix_mode="pure",
+                )
+
+            def forward(self, x):
+                return self.q_proj(x)
+
+        model = Toy().eval()
+        adapter = model.q_proj.cera
+        with torch.no_grad():
+            adapter.B.weight.normal_()
+            x = torch.randn(3, 5, 8)
+            native = model(x)
+            controller = InterventionController(model)
+            name = next(iter(controller.adapters))
+            self.assertEqual(float(controller.gammas[name]), 1.0)
+            moments = controller.new_moments()
+            controller.mask = torch.ones(3, 5, dtype=torch.bool)
+            controller.collect = moments
+            self.assertTrue(torch.equal(model(x), native))
+            controller.collect = None
+            z = adapter.A(x)
+            self.assertAlmostEqual(
+                moments[name].cc, float((act(z) - z).double().square().sum()), places=5
+            )
+            controller.set_fits({name: fit_linear_pieces(moments[name])})
+
+            base = model.q_proj.original_layer(x)
+            controller.condition = "zero"
+            self.assertTrue(torch.allclose(
+                model(x), base + adapter.B(z) * adapter.scaling, atol=1e-6
+            ))
+            fit = controller.fits[name]["matrix"]
+            controller.condition = "affine_matrix"
+            surrogate = base + adapter.B(z + z @ fit["C"].T + fit["b"]) * adapter.scaling
+            self.assertTrue(torch.allclose(model(x), surrogate, atol=1e-5))
+            controller.close()
+
+    def test_identity_adapter_is_rejected(self):
+        wrapper = CeRAWrapper(
+            nn.Linear(8, 8, bias=False), 8, 8, 0.5, dropout=0.0, act_fn="identity",
+            rank=4, variant="peft_aligned", mix_mode="pure",
+        )
+        with self.assertRaises(ValueError):
+            InterventionController(nn.Sequential(wrapper))
+
 
 if __name__ == "__main__":
     unittest.main()
