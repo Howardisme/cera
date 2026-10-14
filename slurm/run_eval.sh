@@ -337,7 +337,9 @@ fi
 # Third difficulty point between MATH-500 (medium) and AMC/AIME (hard).
 # pass@1 only -- pass@10 would cost ~10-13h/cell, not justified for a single
 # hypothesis-validation datapoint.
-if [ ! -f "${OUT_DIR}/math_hard_pass1.json" ]; then
+if [ "${RUN_MATH_HARD:-1}" = "0" ]; then
+    echo "[SKIP 4/4] MATH-Hard disabled (RUN_MATH_HARD=0)"
+elif [ ! -f "${OUT_DIR}/math_hard_pass1.json" ]; then
     echo "[EVAL 4/4] MATH Level 5 pass@1 (greedy, ~1324 problems)..."
     singularity exec --nv -B /work \
         --env PYTHONPATH="$PYPKGS" \
