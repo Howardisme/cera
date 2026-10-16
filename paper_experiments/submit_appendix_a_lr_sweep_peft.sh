@@ -43,6 +43,9 @@ CERA_DROPOUT="${CERA_DROPOUT:-0.0}"
 LORA_DROPOUT="${LORA_DROPOUT:-0.0}"
 GAMMA_INIT="${GAMMA_INIT:-0.0}"
 ACCOUNT="${ACCOUNT:-ACD115147}"
+# EVAL_ONLY=1 re-evaluates existing runs; CHECKPOINT_KIND=final uses the last step instead of best full-sequence val loss.
+EVAL_ONLY="${EVAL_ONLY:-0}"
+CHECKPOINT_KIND="${CHECKPOINT_KIND:-best}"
 EVAL_BASE="results/eval_outputs"
 MODEL_TAG="${BASE_MODEL##*/}"
 
@@ -68,13 +71,19 @@ for rank in $RANKS; do
             tag_lower=$(echo "$tag" | tr '[:upper:]' '[:lower:]')
             [ "$pipe" = "paper" ] && tag_lower="${tag_lower}_paper"
             cell_id="lrsweep_${DATASET}_${MODEL_TAG}_r${rank}_${tag_lower}_lr${lr}_d${dropout}_s${SEED}"
+            [ "$CHECKPOINT_KIND" = "final" ] && cell_id="${cell_id}_final"
+
+            if [ "$pipe" = "paper" ] && { [ "$EVAL_ONLY" = "1" ] || [ "$CHECKPOINT_KIND" = "final" ]; }; then
+                echo "  [SKIP] ${cell_id}: EVAL_ONLY / final checkpoints are only supported for aligned methods"
+                continue
+            fi
 
             if eval_done "$cell_id"; then
                 echo "  [SKIP] ${cell_id}: eval outputs exist"
                 continue
             fi
             if [ "$DRY_RUN" = "1" ]; then
-                echo "  [would submit] ${pipe}: ${method}/${act}/${mix} R=${rank} lr=${lr} D=${dropout} A=${alpha} -> ${cell_id}"
+                echo "  [would submit] ${pipe}: ${method}/${act}/${mix} R=${rank} lr=${lr} D=${dropout} A=${alpha} eval_only=${EVAL_ONLY} ckpt=${CHECKPOINT_KIND} -> ${cell_id}"
                 continue
             fi
 
@@ -90,11 +99,16 @@ for rank in $RANKS; do
                 continue
             fi
 
-            export CERA_VARIANT=peft_aligned CERA_MIX_MODE="$mix" GAMMA_INIT="$GAMMA_INIT" ACT_FN="$act"
-            train_jid=$(sbatch --parsable --account="$ACCOUNT" slurm/run_train_peft.sh \
-                "$method" "$rank" "$lr" "$dropout" "$DATASET" "$EPOCHS" \
-                "$BASE_MODEL" "$alpha" "$TARGETS" "$SEED")
-            eval_jid=$(sbatch --parsable --account="$ACCOUNT" --dependency=afterok:"${train_jid}" \
+            export CERA_VARIANT=peft_aligned CERA_MIX_MODE="$mix" GAMMA_INIT="$GAMMA_INIT" ACT_FN="$act" CHECKPOINT_KIND
+            dep_arg=""
+            train_jid="-"
+            if [ "$EVAL_ONLY" != "1" ]; then
+                train_jid=$(sbatch --parsable --account="$ACCOUNT" slurm/run_train_peft.sh \
+                    "$method" "$rank" "$lr" "$dropout" "$DATASET" "$EPOCHS" \
+                    "$BASE_MODEL" "$alpha" "$TARGETS" "$SEED")
+                dep_arg="--dependency=afterok:${train_jid}"
+            fi
+            eval_jid=$(sbatch --parsable --account="$ACCOUNT" $dep_arg \
                 slurm/run_eval_peft.sh "$cell_id" "$method" "$rank" "$lr" "$dropout" \
                 "$BASE_MODEL" "$EVAL_BASE" "$DATASET" "$alpha" "$TARGETS" "$SEED")
             echo "  ${cell_id} -> train=${train_jid} eval=${eval_jid}"

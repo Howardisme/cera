@@ -43,7 +43,13 @@ CERA_MIX_MODE=${CERA_MIX_MODE:-pure}
 GAMMA_INIT=${GAMMA_INIT:-0.0}
 GAMMA_INTERVENTION=${GAMMA_INTERVENTION:-learned}
 GAMMA_SHUFFLE_SEED=${GAMMA_SHUFFLE_SEED:-20261006}
+CHECKPOINT_KIND=${CHECKPOINT_KIND:-best}
 ADAPTER_FORMAT=peft
+
+if [ "$CHECKPOINT_KIND" != "best" ] && [ "$CHECKPOINT_KIND" != "final" ]; then
+    echo "[ERROR] CHECKPOINT_KIND must be best or final, got: $CHECKPOINT_KIND"
+    exit 1
+fi
 
 if [ "$TARGET_MODULES" = "all_linear" ]; then
     TARGET_MODULES="q_proj,k_proj,v_proj,o_proj,gate_proj,up_proj,down_proj"
@@ -83,12 +89,12 @@ case "$LR" in
 esac
 
 if [ -z "$CHECKPOINT" ]; then
-    CHECKPOINT=$(python3 - "$METHOD" "$DATASET" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" "$ALPHA" "$TARGET_MODULES" "$SEED" "$ACT_FN" "$CERA_VARIANT" "$RECURRENT_STEPS" "$CERA_MIX_MODE" "$GAMMA_INIT" <<'PYSELECT'
+    CHECKPOINT=$(python3 - "$METHOD" "$DATASET" "$RANK" "$LR" "$DROPOUT" "$BASE_MODEL" "$ALPHA" "$TARGET_MODULES" "$SEED" "$ACT_FN" "$CERA_VARIANT" "$RECURRENT_STEPS" "$CERA_MIX_MODE" "$GAMMA_INIT" "$CHECKPOINT_KIND" <<'PYSELECT'
 import json
 import sys
 from pathlib import Path
 
-method, dataset, rank, lr, dropout, base, alpha, targets, seed, activation, variant, recurrent_steps, mix_mode, gamma_init = sys.argv[1:]
+method, dataset, rank, lr, dropout, base, alpha, targets, seed, activation, variant, recurrent_steps, mix_mode, gamma_init, kind = sys.argv[1:]
 expected = dict(model_type=method, dataset=dataset, rank=int(rank), lr=float(lr),
                 dropout=float(dropout), model=base, seed=int(seed))
 matches = []
@@ -106,11 +112,11 @@ for log_path in Path("results").glob(f"Exp_PEFT_{method}_*/{method}/{method}_log
                 or (mix_mode == "learned_mix" and config.get("gamma_init") != float(gamma_init))
                 or (variant == "peft_aligned" and config.get("alpha") != int(alpha))):
             continue
-        pattern = "cera_ckpt_best_*.pt"
+        pattern = f"cera_ckpt_{kind}_*.pt"
     else:
         if config.get("alpha") != int(alpha):
             continue
-        pattern = "peft_adapter_best_*"
+        pattern = f"peft_adapter_{kind}_*"
     matches.extend(log_path.parent.glob(pattern))
 if len(matches) != 1:
     raise SystemExit(f"Expected one matching checkpoint, found {len(matches)}. Set CHECKPOINT_PATH explicitly. Matches: {matches}")
